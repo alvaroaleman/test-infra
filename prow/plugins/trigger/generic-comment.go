@@ -40,20 +40,6 @@ func handleGenericComment(c Client, trigger plugins.Trigger, gc github.GenericCo
 	if gc.Action != github.GenericCommentActionCreated || !gc.IsPR || gc.IssueState != "open" {
 		return nil
 	}
-	// Skip comments not germane to this plugin
-	if !pjutil.RetestRe.MatchString(gc.Body) && !pjutil.OkToTestRe.MatchString(gc.Body) && !pjutil.TestAllRe.MatchString(gc.Body) {
-		matched := false
-		for _, presubmit := range c.Config.Presubmits[gc.Repo.FullName] {
-			matched = matched || presubmit.TriggerMatches(gc.Body)
-			if matched {
-				break
-			}
-		}
-		if !matched {
-			c.Logger.Debug("Comment doesn't match any triggering regex, skipping.")
-			return nil
-		}
-	}
 
 	// Skip bot comments.
 	botName, err := c.GitHubClient.BotName()
@@ -68,6 +54,30 @@ func handleGenericComment(c Client, trigger plugins.Trigger, gc github.GenericCo
 	pr, err := c.GitHubClient.GetPullRequest(org, repo, number)
 	if err != nil {
 		return err
+	}
+
+	baseSHA, err := c.GitHubClient.GetRef(org, repo, "heads/"+pr.Base.Ref)
+	if err != nil {
+		return fmt.Errorf("failed to get baseSHA: %v", err)
+	}
+	presubmits, err := c.Config.GetPresubmits(c.GitClient, org+"/"+repo, baseSHA, pr.Head.SHA)
+	if err != nil {
+		return fmt.Errorf("failed to get presubmits: %v", err)
+	}
+
+	// Skip comments not germane to this plugin
+	if !pjutil.RetestRe.MatchString(gc.Body) && !pjutil.OkToTestRe.MatchString(gc.Body) && !pjutil.TestAllRe.MatchString(gc.Body) {
+		matched := false
+		for _, presubmit := range presubmits {
+			matched = matched || presubmit.TriggerMatches(gc.Body)
+			if matched {
+				break
+			}
+		}
+		if !matched {
+			c.Logger.Debug("Comment doesn't match any triggering regex, skipping.")
+			return nil
+		}
 	}
 
 	// Skip untrusted users comments.
@@ -110,11 +120,11 @@ func handleGenericComment(c Client, trigger plugins.Trigger, gc github.GenericCo
 		}
 	}
 
-	toTest, toSkip, err := FilterPresubmits(HonorOkToTest(trigger), c.GitHubClient, gc.Body, pr, c.Config.Presubmits[gc.Repo.FullName], c.Logger)
+	toTest, toSkip, err := FilterPresubmits(HonorOkToTest(trigger), c.GitHubClient, gc.Body, pr, presubmits, c.Logger)
 	if err != nil {
 		return err
 	}
-	return RunAndSkipJobs(c, pr, toTest, toSkip, gc.GUID, trigger.ElideSkippedContexts)
+	return RunAndSkipJobs(c, pr, baseSHA, toTest, toSkip, gc.GUID, trigger.ElideSkippedContexts)
 }
 
 func HonorOkToTest(trigger plugins.Trigger) bool {
