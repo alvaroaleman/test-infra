@@ -140,15 +140,15 @@ type ProwConfig struct {
 // **Warning:** This does not return dynamic Presubmits configured
 // inside the code repo, hence giving an incomplete view. Use
 // `GetPresubmits` instead if possible.
-func (c *Config) PresubmitsStatic() map[string][]Presubmit {
-	return c.Presubmits
+func (jc *JobConfig) PresubmitsStatic() map[string][]Presubmit {
+	return jc.Presubmits
 }
 
 // GetPresubmits will return all presumits for the given identifier.
 // Once https://github.com/kubernetes/test-infra/issues/13370 is resolved, it will
 // also return Presubmits that are versioned inside the tested repo, if that feature
 // is enabled.
-func (c *Config) GetPresubmits(gc *git.Client, identifier, baseSHA string, headRefs ...string) ([]Presubmit, error) {
+func (jc *JobConfig) GetPresubmits(gc *git.Client, identifier, baseSHA string, headRefs ...string) ([]Presubmit, error) {
 	if gc == nil {
 		return nil, errors.New("gitClient is nil")
 	}
@@ -158,7 +158,7 @@ func (c *Config) GetPresubmits(gc *git.Client, identifier, baseSHA string, headR
 	if baseSHA == "" {
 		return nil, errors.New("baseSHA is empty")
 	}
-	return c.Presubmits[identifier], nil
+	return jc.Presubmits[identifier], nil
 }
 
 // OwnersDirBlacklist is used to configure regular expressions matching directories
