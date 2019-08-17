@@ -136,6 +136,14 @@ type ProwConfig struct {
 	DefaultJobTimeout *metav1.Duration `json:"default_job_timeout,omitempty"`
 }
 
+// InRepoConfigEnabled returns whether InRepoConfig is enabled. Currently
+// a no-op that always returns false, as the underlying feature is not implemented
+// yet. See https://github.com/kubernetes/test-infra/issues/13370 for a current
+// status.
+func (pc *ProwConfig) InRepoConfigEnabled(org, repo string) bool {
+	return false
+}
+
 // PresubmitsStatic returns the presubmits in Prows main config.
 // **Warning:** This does not return dynamic Presubmits configured
 // inside the code repo, hence giving an incomplete view. Use

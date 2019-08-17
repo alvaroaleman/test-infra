@@ -17,8 +17,15 @@ limitations under the License.
 package plugins
 
 import (
+	"errors"
+	"fmt"
+	"reflect"
+	"sync"
 	"testing"
 
+	"k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/prow/github"
+	"k8s.io/test-infra/prow/github/fakegithub"
 	"sigs.k8s.io/yaml"
 )
 
@@ -169,5 +176,188 @@ func TestGetPlugins(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestPullRequest(t *testing.T) {
+	testCases := []struct {
+		name   string
+		agent  *Agent
+		verify func(*Agent, github.PullRequest, error) error
+	}{
+		{
+			name:  "Error when event is not a pull request",
+			agent: &Agent{},
+			verify: func(_ *Agent, _ github.PullRequest, err error) error {
+				if err == nil || err.Error() != "event was not for a pull request" {
+					return fmt.Errorf("Expected error to be 'event was not for a pull request', was %q", err)
+				}
+				return nil
+			},
+		},
+		{
+			name:  "Existing PullRequest is returned",
+			agent: &Agent{isPR: true, pullRequest: &github.PullRequest{ID: 123456}},
+			verify: func(a *Agent, pr github.PullRequest, err error) error {
+				if err != nil {
+					return fmt.Errorf("expected err to be nil, was %v", err)
+				}
+				if a.pullRequest == nil || a.pullRequest.ID != 123456 {
+					return fmt.Errorf("Expected agent to contain pr with id 123456, pr was %v", a.pullRequest)
+				}
+				if pr.ID != 123456 {
+					return fmt.Errorf("Expected returned pr.ID to be 123456, was %d", pr.ID)
+				}
+				return nil
+			},
+		},
+		{
+			name: "PullRequest is fetched, stored and returned",
+			agent: &Agent{
+				lock: &sync.Mutex{},
+				isPR: true,
+				GitHubClient: &fakegithub.FakeClient{
+					PullRequests: map[int]*github.PullRequest{0: &github.PullRequest{ID: 123456}}},
+			},
+			verify: func(a *Agent, pr github.PullRequest, err error) error {
+				if err != nil {
+					return fmt.Errorf("expected err to be nil, was %v", err)
+				}
+				if a.pullRequest == nil || a.pullRequest.ID != 123456 {
+					return fmt.Errorf("expected agent to contain pr with id 123456, pr was %v", a.pullRequest)
+				}
+				if pr.ID != 123456 {
+					return fmt.Errorf("expected returned pr.ID to be 123456, was %d", pr.ID)
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, err := tc.agent.PullRequest()
+			if err := tc.verify(tc.agent, pr, err); err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestBaseSHA(t *testing.T) {
+	testCases := []struct {
+		name   string
+		agent  *Agent
+		verify func(*Agent, string, error) error
+	}{
+		{
+			name:  "No pr, error",
+			agent: &Agent{},
+			verify: func(_ *Agent, _ string, err error) error {
+				if err == nil || err.Error() != "event was not for a pull request" {
+					return fmt.Errorf("Expected error to be 'event was not for a pull request', was %q", err)
+				}
+				return nil
+			},
+		},
+		{
+			name:  "Existing baseSHA is returned",
+			agent: &Agent{isPR: true, baseSHA: "12345"},
+			verify: func(a *Agent, baseSHA string, err error) error {
+				if err != nil {
+					return fmt.Errorf("expected err to be nil, was %v", err)
+				}
+				if a.baseSHA != "12345" {
+					return fmt.Errorf("expected agent baseSHA to be 12345, was %q", a.baseSHA)
+				}
+				if baseSHA != "12345" {
+					return fmt.Errorf("expected returned baseSHA to be 12345, was %q", baseSHA)
+				}
+				return nil
+			},
+		},
+		{
+			name: "BaseSHA is fetched, stored and returned",
+			agent: &Agent{
+				isPR:         true,
+				lock:         &sync.Mutex{},
+				GitHubClient: &fakegithub.FakeClient{},
+				pullRequest:  &github.PullRequest{},
+			},
+			verify: func(a *Agent, baseSHA string, err error) error {
+				if err != nil {
+					return fmt.Errorf("expected err to be nil, was %v", err)
+				}
+				if a.baseSHA != fakegithub.TestRef {
+					return fmt.Errorf("expected baseSHA on agent to be %q, was %q", fakegithub.TestRef, a.baseSHA)
+				}
+				if baseSHA != fakegithub.TestRef {
+					return fmt.Errorf("expected returned baseSHA to be %q, was %q", fakegithub.TestRef, baseSHA)
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseSHA, err := tc.agent.BaseSHA()
+			if err := tc.verify(tc.agent, baseSHA, err); err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
+	}
+}
+
+// TODO @alvaroaleman: Add more tests once InRepoConfig can be enabled
+func TestPresubmits(t *testing.T) {
+	testCases := []struct {
+		name   string
+		agent  *Agent
+		verify func(*Agent, []config.Presubmit, error) error
+	}{
+		{
+			name:  "Error when event is not a pull request",
+			agent: &Agent{},
+			verify: func(_ *Agent, _ []config.Presubmit, err error) error {
+				if err == nil || err.Error() != "event was not for a pull request" {
+					return fmt.Errorf("expected error to be 'event was not for a pull request', was %q", err)
+				}
+				return nil
+			},
+		},
+		{
+			name: "Inrepoconfig disabled, static presubmits are returned",
+			agent: &Agent{
+				isPR: true,
+				org:  "my-org",
+				repo: "my-repo",
+				Config: &config.Config{
+					JobConfig: config.JobConfig{
+						Presubmits: map[string][]config.Presubmit{
+							"my-org/my-repo": []config.Presubmit{{}, {}},
+						},
+					},
+				},
+			},
+			verify: func(a *Agent, ps []config.Presubmit, err error) error {
+				if err != nil {
+					return fmt.Errorf("expected err to be nil, was %v", err)
+				}
+				if !reflect.DeepEqual(a.Config.JobConfig.Presubmits["my-org/my-repo"], ps) {
+					return errors.New("returned presubmits are not identical to the ones in the config")
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ps, err := tc.agent.Presubmits()
+			if err := tc.verify(tc.agent, ps, err); err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
 	}
 }

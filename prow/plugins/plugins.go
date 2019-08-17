@@ -156,10 +156,122 @@ type Agent struct {
 
 	// may be nil if not initialized
 	commentPruner *commentpruner.EventClient
+
+	// Whether the given event was for a pr
+	isPR      bool
+	org, repo string
+	number    int
+
+	// These may be unset. You must acquire lock before writing to them
+	lock        *sync.Mutex
+	baseSHA     string
+	pullRequest *github.PullRequest
+	presubmits  []config.Presubmit
+}
+
+// Presubmit returns the Presubmits for the given event or an error. It
+// must only be invoked if the given event was for a PullRequest
+func (a *Agent) Presubmits() ([]config.Presubmit, error) {
+	if !a.isPR {
+		return nil, errors.New("event was not for a pull request")
+	}
+
+	// If InRepoConfig is not enabled we can safely just return the static
+	// presubmits and be done
+	if !a.Config.InRepoConfigEnabled(a.org, a.repo) {
+		return a.Config.PresubmitsStatic()[a.org+"/"+a.repo], nil
+	}
+
+	if a.presubmits != nil {
+		return a.presubmits, nil
+	}
+
+	if a.baseSHA == "" {
+		_, err := a.BaseSHA()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	// The lockholder may have filled this
+	if a.presubmits != nil {
+		return a.presubmits, nil
+	}
+
+	presubmits, err := a.Config.GetPresubmits(a.GitClient, a.org+"/"+a.repo, a.baseSHA, a.pullRequest.Head.SHA)
+	if err != nil {
+		return nil, err
+	}
+	a.presubmits = presubmits
+
+	return a.presubmits, nil
+}
+
+// BaseSHA returns the BaseSHA for the given event or an error. It must only
+// be invoked if the given event was for a PullRequest
+func (a *Agent) BaseSHA() (string, error) {
+	if !a.isPR {
+		return "", errors.New("event was not for a pull request")
+	}
+	if a.baseSHA != "" {
+		return a.baseSHA, nil
+	}
+
+	if a.pullRequest == nil {
+		_, err := a.PullRequest()
+		if err != nil {
+			return "", err
+		}
+	}
+
+	// Must be acquired after calling a.PullRequest, because the latter also acquires this lock
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	// The lockholder may have filled this
+	if a.baseSHA != "" {
+		return a.baseSHA, nil
+	}
+
+	baseSHA, err := a.GitHubClient.GetRef(a.org, a.repo, "heads/"+a.pullRequest.Base.Ref)
+	if err != nil {
+		return "", err
+	}
+	a.baseSHA = baseSHA
+
+	return a.baseSHA, nil
+}
+
+// PullRequest returns the PullRequest for the given event or an error. It must only
+// be invoked if the given event was for a PullRequest
+func (a *Agent) PullRequest() (github.PullRequest, error) {
+	if !a.isPR {
+		return github.PullRequest{}, errors.New("event was not for a pull request")
+	}
+
+	if a.pullRequest != nil {
+		return *a.pullRequest, nil
+	}
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	// The lockholder may have filled this
+	if a.pullRequest != nil {
+		return *a.pullRequest, nil
+	}
+
+	pr, err := a.GitHubClient.GetPullRequest(a.org, a.repo, a.number)
+	if err != nil {
+		return github.PullRequest{}, err
+	}
+
+	a.pullRequest = pr
+	return *a.pullRequest, nil
 }
 
 // NewAgent bootstraps a new config.Agent struct from the passed dependencies.
-func NewAgent(configAgent *config.Agent, pluginConfigAgent *ConfigAgent, clientAgent *ClientAgent, metrics *Metrics, logger *logrus.Entry) Agent {
+func NewAgent(configAgent *config.Agent, pluginConfigAgent *ConfigAgent, clientAgent *ClientAgent, metrics *Metrics, logger *logrus.Entry, org, repo string, number int, isPR bool) Agent {
 	prowConfig := configAgent.Config()
 	pluginConfig := pluginConfigAgent.Config()
 	return Agent{
@@ -174,6 +286,10 @@ func NewAgent(configAgent *config.Agent, pluginConfigAgent *ConfigAgent, clientA
 		Config:           prowConfig,
 		PluginConfig:     pluginConfig,
 		Logger:           logger,
+		org:              org,
+		repo:             repo,
+		isPR:             isPR,
+		lock:             &sync.Mutex{},
 	}
 }
 

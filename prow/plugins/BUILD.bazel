@@ -15,7 +15,9 @@ go_test(
     ],
     embed = [":go_default_library"],
     deps = [
+        "//prow/config:go_default_library",
         "//prow/github:go_default_library",
+        "//prow/github/fakegithub:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/util/diff:go_default_library",
         "//vendor/sigs.k8s.io/yaml:go_default_library",
     ],
