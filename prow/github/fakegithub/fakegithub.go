@@ -17,9 +17,12 @@ limitations under the License.
 package fakegithub
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"regexp"
 
+	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/test-infra/prow/github"
 )
@@ -645,4 +648,204 @@ func (f *FakeClient) GetTeamBySlug(slug string, org string) (*github.Team, error
 		}
 	}
 	return &github.Team{}, nil
+}
+
+func (f *FakeClient) AddRepoLabel(org, repo, label, description, color string) error {
+	return nil
+}
+
+func (f *FakeClient) CloseIssue(org, repo string, number int) error {
+	return nil
+}
+
+func (f *FakeClient) ClosePR(org, repo string, number int) error {
+	return nil
+}
+
+func (f *FakeClient) CreateFork(owner, repo string) error {
+	return nil
+}
+
+func (f *FakeClient) CreateOrgHook(org string, req github.HookRequest) (int, error) {
+	return 0, nil
+}
+
+func (f *FakeClient) CreatePullRequest(org, repo, title, body, head, base string, canModify bool) (int, error) {
+	return 0, nil
+}
+
+func (f *FakeClient) CreateRepoHook(org, repo string, req github.HookRequest) (int, error) {
+	return 0, nil
+}
+
+func (f *FakeClient) CreateTeam(org string, team github.Team) (*github.Team, error) {
+	return &team, nil
+}
+
+func (f *FakeClient) DeleteRepoLabel(org, repo, label string) error {
+	return nil
+}
+
+func (f *FakeClient) DeleteTeam(id int) error {
+	return nil
+}
+
+func (f *FakeClient) EditComment(org, repo string, ID int, comment string) error {
+	return nil
+}
+
+func (f *FakeClient) EditOrg(name string, config github.Organization) (*github.Organization, error) {
+	return &config, nil
+}
+
+func (f *FakeClient) EditOrgHook(org string, id int, req github.HookRequest) error {
+	return nil
+}
+
+func (f *FakeClient) EditRepoHook(org, repo string, id int, req github.HookRequest) error {
+	return nil
+}
+
+func (f *FakeClient) EditTeam(t github.Team) (*github.Team, error) {
+	return &t, nil
+}
+
+func (f *FakeClient) Email() (string, error) {
+	return "hello@world", nil
+}
+
+func (f *FakeClient) GetBranchProtection(org, repo, branch string) (*github.BranchProtection, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *FakeClient) GetBranches(org, repo string, onlyProtected bool) ([]github.Branch, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) GetOrg(name string) (*github.Organization, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *FakeClient) GetPullRequestPatch(org, repo string, number int) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) GetPullRequests(org, repo string) ([]github.PullRequest, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) GetRepo(owner, name string) (github.Repo, error) {
+	return github.Repo{}, nil
+}
+
+func (f *FakeClient) GetUserPermission(org, repo, user string) (string, error) {
+	return "", nil
+}
+
+func (f *FakeClient) HasPermission(org, repo, user string, role ...string) (bool, error) {
+	return true, nil
+}
+
+func (f *FakeClient) IsMergeable(org, repo string, number int, SHA string) (bool, error) {
+	return true, nil
+}
+
+func (f *FakeClient) ListOrgHooks(org string) ([]github.Hook, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) ListOrgInvitations(org string) ([]github.OrgInvitation, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) ListOrgMembers(org, role string) ([]github.TeamMember, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) ListRepoHooks(org, repo string) ([]github.Hook, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) ListTeamInvitations(id int) ([]github.OrgInvitation, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) ListTeamRepos(id int) ([]github.Repo, error) {
+	return nil, nil
+}
+
+func (f *FakeClient) Merge(org, repo string, pr int, details github.MergeDetails) error {
+	return nil
+}
+
+func (f *FakeClient) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+	return nil
+}
+
+func (f *FakeClient) RemoveBranchProtection(org, repo, branch string) error {
+	return nil
+}
+
+func (f *FakeClient) RemoveOrgMembership(org, user string) error {
+	return nil
+}
+
+func (f *FakeClient) RemoveTeamMembership(id int, user string) error {
+	return nil
+}
+
+func (f *FakeClient) RemoveTeamRepo(id int, org, repo string) error {
+	return nil
+}
+
+func (f *FakeClient) ReopenIssue(owner, repo string, number int) error {
+	return nil
+}
+
+func (f *FakeClient) ReopenPR(owner, repo string, number int) error {
+	return nil
+}
+
+func (f *FakeClient) RequestReview(org, repo string, number int, logins []string) error {
+	return nil
+}
+
+func (f *FakeClient) SetMax404Retries(int) {}
+
+func (f *FakeClient) Throttle(hourlyTokens, burst int) {}
+
+func (f *FakeClient) UnassignIssue(owner, repo string, number int, logins []string) error {
+	return nil
+}
+
+func (f *FakeClient) UnrequestReview(org, repo string, number int, logins []string) error {
+	return nil
+}
+
+func (f *FakeClient) UpdateBranchProtection(org, repo, branch string, config github.BranchProtectionRequest) error {
+	return nil
+}
+
+func (f *FakeClient) UpdateOrgMembership(org, user string, admin bool) (*github.OrgMembership, error) {
+	return &github.OrgMembership{}, nil
+}
+
+func (f *FakeClient) UpdatePullRequest(org, repo string, number int, title, body *string, open *bool, branch *string, canModify *bool) error {
+	return nil
+}
+
+func (f *FakeClient) UpdateRepoLabel(org, repo, label, newName, description, color string) error {
+	return nil
+}
+
+func (f *FakeClient) UpdateTeamMembership(id int, user string, maintainer bool) (*github.TeamMembership, error) {
+	return &github.TeamMembership{}, nil
+}
+
+func (f *FakeClient) UpdateTeamRepo(id int, org, repo string, permission github.RepoPermissionLevel) error {
+	return nil
+}
+
+func (f *FakeClient) WithFields(fields logrus.Fields) github.Client {
+	return f
 }
