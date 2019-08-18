@@ -34,11 +34,11 @@ func handlePR(c Client, trigger plugins.Trigger, pr github.PullRequestEvent) err
 	author := string(a)
 	num := pr.PullRequest.Number
 
-	baseSHA, err := c.GitHubClient.GetRef(org, repo, "heads/"+pr.PullRequest.Base.Ref)
+	baseSHA, err := c.BaseSHA()
 	if err != nil {
 		return fmt.Errorf("failed to get baseSHA: %v", err)
 	}
-	presubmits, err := c.Config.GetPresubmits(c.GitClient, org+"/"+repo, baseSHA, pr.PullRequest.Head.SHA)
+	presubmits, err := c.Presubmits()
 	if err != nil {
 		return fmt.Errorf("failed to get presubmits: %v", err)
 	}

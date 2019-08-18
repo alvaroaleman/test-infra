@@ -25,7 +25,6 @@ import (
 	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	"k8s.io/test-infra/prow/config"
 	"k8s.io/test-infra/prow/errorutil"
-	"k8s.io/test-infra/prow/git"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/pjutil"
 	"k8s.io/test-infra/prow/pluginhelp"
@@ -127,7 +126,9 @@ type Client struct {
 	ProwJobClient prowJobClient
 	Config        *config.Config
 	Logger        *logrus.Entry
-	GitClient     *git.Client
+	PR            func() (github.PullRequest, error)
+	BaseSHA       func() (string, error)
+	Presubmits    func() ([]config.Presubmit, error)
 }
 
 // trustedUserClient is used to check is user member and repo collaborator
@@ -142,7 +143,9 @@ func getClient(pc plugins.Agent) Client {
 		Config:        pc.Config,
 		ProwJobClient: pc.ProwJobClient,
 		Logger:        pc.Logger,
-		GitClient:     pc.GitClient,
+		PR:            pc.PullRequest,
+		BaseSHA:       pc.BaseSHA,
+		Presubmits:    pc.Presubmits,
 	}
 }
 

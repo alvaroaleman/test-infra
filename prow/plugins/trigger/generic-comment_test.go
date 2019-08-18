@@ -29,7 +29,6 @@ import (
 	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	"k8s.io/test-infra/prow/client/clientset/versioned/fake"
 	"k8s.io/test-infra/prow/config"
-	"k8s.io/test-infra/prow/git"
 	"k8s.io/test-infra/prow/github"
 	"k8s.io/test-infra/prow/github/fakegithub"
 	"k8s.io/test-infra/prow/labels"
@@ -815,7 +814,8 @@ func TestHandleGenericComment(t *testing.T) {
 			ProwJobClient: fakeProwJobClient.ProwV1().ProwJobs(fakeConfig.ProwJobNamespace),
 			Config:        fakeConfig,
 			Logger:        logrus.WithField("plugin", PluginName),
-			GitClient:     &git.Client{},
+			PR:            func() (github.PullRequest, error) { return github.PullRequest{}, nil },
+			BaseSHA:       func() (string, error) { return "123", nil },
 		}
 		presubmits := tc.Presubmits
 		if presubmits == nil {
@@ -847,8 +847,8 @@ func TestHandleGenericComment(t *testing.T) {
 				},
 			}
 		}
-		if err := c.Config.SetPresubmits(presubmits); err != nil {
-			t.Fatalf("%s: failed to set presubmits: %v", tc.name, err)
+		c.Presubmits = func() ([]config.Presubmit, error) {
+			return tc.Presubmits["org/repo"], nil
 		}
 
 		event := github.GenericCommentEvent{
