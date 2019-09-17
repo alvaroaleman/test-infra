@@ -19,9 +19,9 @@ go_test(
         "yaml2proto_test.go",
     ],
     data = [
+        "//config:config.yaml",
         "//config:prowjobs",
         "//config:testgrids",
-        "//prow:config.yaml",
     ],
     embed = [":go_default_library"],
     deps = [

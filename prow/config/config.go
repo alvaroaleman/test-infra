@@ -1085,7 +1085,7 @@ func (c *Config) validateJobConfig() error {
 }
 
 // DefaultConfigPath will be used if a --config-path is unset
-const DefaultConfigPath = "/etc/config/config.yaml"
+const DefaultConfigPath = "/etc/config/prow/config.yaml"
 
 // ConfigPath returns the value for the component's configPath if provided
 // explicitly or default otherwise.

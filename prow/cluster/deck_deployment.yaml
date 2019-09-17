@@ -49,7 +49,7 @@ spec:
         - --hook-url=http://hook:8888/plugin-help
         - --redirect-http-to=prow.k8s.io
         - --oauth-url=/github-login
-        - --config-path=/etc/config/config.yaml
+        - --config-path=/etc/config/prow/config.yaml
         - --job-config-path=/etc/job-config
         - --spyglass=true
         - --rerun-creates-job

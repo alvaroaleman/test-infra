@@ -19,7 +19,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-export CONFIG_PATH="$(readlink -f $(dirname "${BASH_SOURCE[0]}")/../prow/config.yaml)"
+export CONFIG_PATH="$(readlink -f $(dirname "${BASH_SOURCE[0]}")/../config/prow/config.yaml)"
 export JOB_CONFIG_PATH="$(readlink -f $(dirname "${BASH_SOURCE[0]}")/jobs)"
 
 ../prow/pj-on-kind.sh "$@"

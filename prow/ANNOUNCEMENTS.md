@@ -87,7 +87,7 @@ used when updating deployments.
  - *April 2, 2019* `hook`, `deck`, `horologium`, `tide`, `plank` and `sinker` will no
    longer provide a default value for the `--config-path` flag.
    It is required to explicitly provide `--config-path` when upgrading to a new version of
-   these components that were previously relying on the default `--config-path=/etc/config/config.yaml`.
+   these components that were previously relying on the default `--config-path=/etc/config/prow/config.yaml`.
  - *March 29, 2019* Custom logos should be provided as full paths in the configuration
    under `deck.branding.logos` and will not implicitly be assumed to be under the static
    assets directory.

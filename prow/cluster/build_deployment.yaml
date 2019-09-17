@@ -21,7 +21,7 @@ spec:
         image: gcr.io/k8s-prow/build:v20190917-395658c48
         args:
         - --all-contexts
-        - --config=/etc/prow-config/config.yaml
+        - --config=/etc/prow-config/prow/config.yaml
         - --build-cluster=/etc/build-cluster/cluster
         volumeMounts:
         - mountPath: /etc/build-cluster

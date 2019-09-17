@@ -74,7 +74,7 @@ func init() {
 	fs.IntVar(&flagOptions.port, "port", 80, "HTTP Port.")
 	fs.StringVar(&flagOptions.pushSecretFile, "push-secret-file", "", "Path to Pub/Sub Push secret file.")
 
-	fs.StringVar(&flagOptions.configPath, "config-path", "/etc/config/config.yaml", "Path to config.yaml.")
+	fs.StringVar(&flagOptions.configPath, "config-path", "/etc/config/prow/config.yaml", "Path to config.yaml.")
 	fs.StringVar(&flagOptions.jobConfigPath, "job-config-path", "", "Path to prow job configs.")
 
 	fs.BoolVar(&flagOptions.dryRun, "dry-run", true, "Dry run for testing. Uses API tokens but does not mutate.")

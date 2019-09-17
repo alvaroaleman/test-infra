@@ -15,7 +15,7 @@ Sample usage:
 ./config-bootstrapper \
     --dry-run=false \
     --source-path=.  \
-    --config-path=prowconfig/config.yaml \
-    --plugin-config=prowconfig/plugins.yaml \
+    --config-path=config/prow/config.yaml \
+    --plugin-config=config/prow/plugins.yaml \
     --job-config-path=prowconfig/jobs
 ```

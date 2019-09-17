@@ -20,7 +20,7 @@ spec:
       - name: sinker
         args:
         - --build-cluster=/etc/cluster/cluster
-        - --config-path=/etc/config/config.yaml
+        - --config-path=/etc/config/prow/config.yaml
         - --job-config-path=/etc/job-config
         - --dry-run=false
         image: gcr.io/k8s-prow/sinker:v20190917-395658c48

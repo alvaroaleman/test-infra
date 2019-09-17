@@ -25,7 +25,7 @@ for output in gs://k8s-testgrid-canary/config gs://k8s-testgrid/config; do
   bazel run //testgrid/cmd/configurator -- \
     --yaml="${TESTINFRA_ROOT}/config/testgrids" \
     --default="${TESTINFRA_ROOT}/config/testgrids/default.yaml" \
-    --prow-config="${TESTINFRA_ROOT}/prow/config.yaml" \
+    --prow-config="${TESTINFRA_ROOT}/config/prow/config.yaml" \
     --prow-job-config="${TESTINFRA_ROOT}/config/jobs/" \
     --output="${output}" \
     --oneshot \
