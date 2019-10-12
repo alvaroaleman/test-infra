@@ -9,7 +9,7 @@ presets:
   - name: REGISTRY
     value: k8sprow.azurecr.io
   - name: KUBE_VERBOSE
-    value: 0
+    value: "0"
   volumes:
   - name: azure-cred
     secret:

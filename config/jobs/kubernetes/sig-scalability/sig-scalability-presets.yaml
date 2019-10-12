@@ -40,14 +40,14 @@ presets:
     value: "TaintBasedEvictions=true"
   # Allow one node to not be ready after cluster creation.
   - name: ALLOWED_NOTREADY_NODES
-    value: 1
+    value: "1"
   - name: ENABLE_PROMETHEUS_SERVER
     value: "true"
   - name: KUBE_MASTER_NODE_LABELS
     value: "node.kubernetes.io/node-exporter-ready=true"
   # Keep all logrotated files (not just 5 latest which is a default)
   - name: LOGROTATE_FILES_MAX_COUNT
-    value: 1000
+    value: "1000"
   - name: LOGROTATE_MAX_SIZE
     value: "5G"
   # Ensure good enough architecture for master machines.
@@ -127,7 +127,7 @@ presets:
     value: "true"
   # Keep all logrotated files (not just 5 latest which is a default)
   - name: LOGROTATE_FILES_MAX_COUNT
-    value: 1000
+    value: "1000"
   - name: ENABLE_PROMETHEUS_SERVER
     value: "true"
   - name: KUBE_MASTER_NODE_LABELS
