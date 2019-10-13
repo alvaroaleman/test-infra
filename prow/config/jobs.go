@@ -441,7 +441,7 @@ type UtilityConfig struct {
 // This is the set of all presubmits intersected with ((alwaysRun + runContexts) - skipContexts)
 func (c *JobConfig) RetestPresubmits(fullRepoName string, skipContexts, runContexts sets.String) []Presubmit {
 	var result []Presubmit
-	if jobs, ok := c.Presubmits[fullRepoName]; ok {
+	if jobs, ok := c.presubmits[fullRepoName]; ok {
 		for _, job := range jobs {
 			if skipContexts.Has(job.Context) {
 				continue
@@ -454,18 +454,6 @@ func (c *JobConfig) RetestPresubmits(fullRepoName string, skipContexts, runConte
 	return result
 }
 
-// GetPresubmit returns the presubmit job for the provided repo and job name.
-func (c *JobConfig) GetPresubmit(repo, jobName string) *Presubmit {
-	presubmits := c.AllPresubmits([]string{repo})
-	for i := range presubmits {
-		ps := presubmits[i]
-		if ps.Name == jobName {
-			return &ps
-		}
-	}
-	return nil
-}
-
 // SetPresubmits updates c.Presubmits to jobs, after compiling and validating their regexes.
 func (c *JobConfig) SetPresubmits(jobs map[string][]Presubmit) error {
 	nj := map[string][]Presubmit{}
@@ -476,7 +464,7 @@ func (c *JobConfig) SetPresubmits(jobs map[string][]Presubmit) error {
 			return err
 		}
 	}
-	c.Presubmits = nj
+	c.presubmits = nj
 	return nil
 }
 
@@ -494,12 +482,12 @@ func (c *JobConfig) SetPostsubmits(jobs map[string][]Postsubmit) error {
 	return nil
 }
 
-// AllPresubmits returns all prow presubmit jobs in repos.
+// allPresubmits returns all prow presubmit jobs in repos.
 // if repos is empty, return all presubmits.
-func (c *JobConfig) AllPresubmits(repos []string) []Presubmit {
+func (c *JobConfig) allPresubmits(repos []string) []Presubmit {
 	var res []Presubmit
 
-	for repo, v := range c.Presubmits {
+	for repo, v := range c.presubmits {
 		if len(repos) == 0 {
 			res = append(res, v...)
 		} else {

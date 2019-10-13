@@ -65,7 +65,7 @@ func TestMain(m *testing.M) {
 
 	conf, err := Load(*configPath, *jobConfigPath)
 	if err != nil {
-		fmt.Printf("Could not load config: %v", err)
+		fmt.Println(fmt.Sprintf("Could not load config: %v", err))
 		os.Exit(1)
 	}
 	c = conf
@@ -74,11 +74,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestPresubmits(t *testing.T) {
-	if len(c.Presubmits) == 0 {
+	if len(c.presubmits) == 0 {
 		t.Fatalf("No jobs found in presubmit.yaml.")
 	}
 
-	for _, rootJobs := range c.Presubmits {
+	for _, rootJobs := range c.presubmits {
 		for i, job := range rootJobs {
 			if job.Name == "" {
 				t.Errorf("Job %v needs a name.", job)
@@ -193,7 +193,7 @@ func TestRetestPresubmits(t *testing.T) {
 	}
 	c := &Config{
 		JobConfig: JobConfig{
-			Presubmits: map[string][]Presubmit{
+			presubmits: map[string][]Presubmit{
 				"org/repo": {
 					{
 						Reporter: Reporter{
@@ -293,7 +293,7 @@ func TestConditionalPresubmits(t *testing.T) {
 func TestListPresubmit(t *testing.T) {
 	c := &Config{
 		JobConfig: JobConfig{
-			Presubmits: map[string][]Presubmit{
+			presubmits: map[string][]Presubmit{
 				"r1": {
 					{
 						JobBase: JobBase{
@@ -338,7 +338,7 @@ func TestListPresubmit(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		actual := c.AllPresubmits(tc.repos)
+		actual := c.allPresubmits(tc.repos)
 		if len(actual) != len(tc.expected) {
 			t.Fatalf("test %s - Wrong number of jobs. Got %v, expected %v", tc.name, actual, tc.expected)
 		}
@@ -360,7 +360,7 @@ func TestListPresubmit(t *testing.T) {
 func TestListPostsubmit(t *testing.T) {
 	c := &Config{
 		JobConfig: JobConfig{
-			Presubmits: map[string][]Presubmit{
+			presubmits: map[string][]Presubmit{
 				"r1": {{JobBase: JobBase{Name: "a"}}},
 			},
 			Postsubmits: map[string][]Postsubmit{
@@ -420,7 +420,7 @@ func TestListPostsubmit(t *testing.T) {
 func TestListPeriodic(t *testing.T) {
 	c := &Config{
 		JobConfig: JobConfig{
-			Presubmits: map[string][]Presubmit{
+			presubmits: map[string][]Presubmit{
 				"r1": {{JobBase: JobBase{Name: "a"}}},
 			},
 			Postsubmits: map[string][]Postsubmit{
@@ -515,7 +515,7 @@ func TestRunAgainstBranch(t *testing.T) {
 }
 
 func TestValidPodNames(t *testing.T) {
-	for _, j := range c.AllPresubmits([]string{}) {
+	for _, j := range c.allPresubmits([]string{}) {
 		if !podRe.MatchString(j.Name) {
 			t.Errorf("Job \"%s\" must match regex \"%s\".", j.Name, podRe.String())
 		}

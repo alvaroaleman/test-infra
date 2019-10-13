@@ -67,12 +67,30 @@ type Config struct {
 	ProwConfig
 }
 
+// UnmarshalJSON is required, because otherwise
+// the UnmarshalJSON of the embedded JobConfig struct
+// will be called instead, making us never get any data
+// for ProwConfig.
+func (c *Config) UnmarshalJSON(data []byte) error {
+	jc := JobConfig{}
+	pc := ProwConfig{}
+	if err := yaml.Unmarshal(data, &jc); err != nil {
+		return err
+	}
+	if err := yaml.Unmarshal(data, &pc); err != nil {
+		return err
+	}
+	c.JobConfig = jc
+	c.ProwConfig = pc
+	return nil
+}
+
 // JobConfig is config for all prow jobs
 type JobConfig struct {
 	// Presets apply to all job types.
 	Presets []Preset `json:"presets,omitempty"`
 	// Full repo name (such as "kubernetes/kubernetes") -> list of jobs.
-	Presubmits  map[string][]Presubmit  `json:"presubmits,omitempty"`
+	presubmits  map[string][]Presubmit
 	Postsubmits map[string][]Postsubmit `json:"postsubmits,omitempty"`
 
 	// Periodics are not associated with any repo.
@@ -84,6 +102,22 @@ type JobConfig struct {
 
 	// FakeInRepoConfig is used for tests. Its key is the headSHA.
 	FakeInRepoConfig map[string][]Presubmit `json:"-"`
+}
+
+// UnmarshalJSON is required for reading into the unexported `presubmits` field
+func (jc *JobConfig) UnmarshalJSON(data []byte) error {
+	// The alias is needed to prevent the unmarshaller from recursing
+	type JC JobConfig
+	unmarshalTarget := struct {
+		JC         `json:",inline"`
+		Presubmits map[string][]Presubmit `json:"presubmits,omitempty"`
+	}{}
+	if err := yaml.Unmarshal(data, &unmarshalTarget); err != nil {
+		return err
+	}
+	unmarshalTarget.JC.presubmits = unmarshalTarget.Presubmits
+	*jc = JobConfig(unmarshalTarget.JC)
+	return nil
 }
 
 // ProwConfig is config for all prow controllers
@@ -185,7 +219,7 @@ type RefGetter = func() (string, error)
 // inside the code repo, hence giving an incomplete view. Use
 // `GetPresubmits` instead if possible.
 func (jc *JobConfig) PresubmitsStatic() map[string][]Presubmit {
-	return jc.Presubmits
+	return jc.presubmits
 }
 
 type refGetterForGitHubPullRequestClient interface {
@@ -281,7 +315,7 @@ func (c *Config) GetPresubmits(gc *git.Client, identifier string, baseSHAGetter 
 		return nil, errors.New("no identifier for repo given")
 	}
 	if !c.InRepoConfigEnabled(identifier) {
-		return c.Presubmits[identifier], nil
+		return c.presubmits[identifier], nil
 	}
 
 	baseSHA, err := baseSHAGetter()
@@ -300,7 +334,7 @@ func (c *Config) GetPresubmits(gc *git.Client, identifier string, baseSHAGetter 
 	// Currently, only a fake implementation exists for tests.
 	_ = baseSHA
 	if c.FakeInRepoConfig != nil {
-		return append(c.Presubmits[identifier], c.FakeInRepoConfig[strings.Join(headSHAs, "")]...), nil
+		return append(c.presubmits[identifier], c.FakeInRepoConfig[strings.Join(headSHAs, "")]...), nil
 	}
 	return nil, errors.New("inrepoconfig is not yet implemented :/")
 }
@@ -308,10 +342,10 @@ func (c *Config) GetPresubmits(gc *git.Client, identifier string, baseSHAGetter 
 // SetTestPresubmits allows to set the presubmits for identifier. It must be
 // used by testcode only
 func (jc *JobConfig) SetTestPresubmits(identifier string, presubmits []Presubmit) {
-	if jc.Presubmits == nil {
-		jc.Presubmits = map[string][]Presubmit{}
+	if jc.presubmits == nil {
+		jc.presubmits = map[string][]Presubmit{}
 	}
-	jc.Presubmits[identifier] = presubmits
+	jc.presubmits[identifier] = presubmits
 }
 
 // OwnersDirBlacklist is used to configure regular expressions matching directories
@@ -792,14 +826,16 @@ func yamlToConfig(path string, nc interface{}) error {
 		jc = v
 	case *Config:
 		jc = &v.JobConfig
+	default:
+		return fmt.Errorf("config is of unexpected type %T", nc)
 	}
-	for rep := range jc.Presubmits {
+	for rep := range jc.presubmits {
 		var fix func(*Presubmit)
 		fix = func(job *Presubmit) {
 			job.SourcePath = path
 		}
-		for i := range jc.Presubmits[rep] {
-			fix(&jc.Presubmits[rep][i])
+		for i := range jc.presubmits[rep] {
+			fix(&jc.presubmits[rep][i])
 		}
 	}
 	for rep := range jc.Postsubmits {
@@ -845,7 +881,7 @@ func ReadFileMaybeGZIP(path string) ([]byte, error) {
 func (c *Config) mergeJobConfig(jc JobConfig) error {
 	m, err := mergeJobConfigs(JobConfig{
 		Presets:     c.Presets,
-		Presubmits:  c.Presubmits,
+		presubmits:  c.presubmits,
 		Periodics:   c.Periodics,
 		Postsubmits: c.Postsubmits,
 	}, jc)
@@ -853,7 +889,7 @@ func (c *Config) mergeJobConfig(jc JobConfig) error {
 		return err
 	}
 	c.Presets = m.Presets
-	c.Presubmits = m.Presubmits
+	c.presubmits = m.presubmits
 	c.Periodics = m.Periodics
 	c.Postsubmits = m.Postsubmits
 	return nil
@@ -887,12 +923,12 @@ func mergeJobConfigs(a, b JobConfig) (JobConfig, error) {
 	c.Periodics = append(a.Periodics, b.Periodics...)
 
 	// *** Presubmits ***
-	c.Presubmits = make(map[string][]Presubmit)
-	for repo, jobs := range a.Presubmits {
-		c.Presubmits[repo] = jobs
+	c.presubmits = make(map[string][]Presubmit)
+	for repo, jobs := range a.presubmits {
+		c.presubmits[repo] = jobs
 	}
-	for repo, jobs := range b.Presubmits {
-		c.Presubmits[repo] = append(c.Presubmits[repo], jobs...)
+	for repo, jobs := range b.presubmits {
+		c.presubmits[repo] = append(c.presubmits[repo], jobs...)
 	}
 
 	// *** Postsubmits ***
@@ -1006,7 +1042,7 @@ func (c *Config) finalizeJobConfig() error {
 		}
 	}
 
-	for repo, jobs := range c.Presubmits {
+	for repo, jobs := range c.presubmits {
 		if err := defaultPresubmits(jobs, c, repo); err != nil {
 			return err
 		}
@@ -1141,7 +1177,7 @@ func validatePeriodics(periodics []Periodic, podNamespace string) error {
 func (c *Config) validateJobConfig() error {
 
 	// Validate presubmits.
-	for _, jobs := range c.Presubmits {
+	for _, jobs := range c.presubmits {
 		if err := validatePresubmits(jobs, c.PodNamespace); err != nil {
 			return err
 		}
@@ -1437,7 +1473,7 @@ func parseProwConfig(c *Config) error {
 }
 
 func (c *JobConfig) decorationRequested() bool {
-	for _, vs := range c.Presubmits {
+	for _, vs := range c.presubmits {
 		for i := range vs {
 			if vs[i].Decorate {
 				return true
