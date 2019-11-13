@@ -250,6 +250,15 @@ func TestExpectedStatus(t *testing.T) {
 			state: github.StatusPending,
 			desc:  "Not mergeable. Waiting for retest of Job [bar]",
 		},
+		{
+			name:             "missing passing up-to-date context",
+			inPool:           true,
+			baseref:          "baseref",
+			requiredContexts: []string{"this-is-a-very-long-status-context-and-should-certainly-not-be-displayed-in-full-otherwise-github-will-just-start-burning-and-yelling"},
+
+			state: github.StatusPending,
+			desc:  "Not mergeable. Waiting for retest of Job [this-is-a-very-long-status-context-and-should-certainly-not-be-displayed-in-full-otherwise-github",
+		},
 	}
 
 	for _, tc := range testcases {

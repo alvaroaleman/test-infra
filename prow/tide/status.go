@@ -256,6 +256,7 @@ func (sc *statusController) expectedStatus(log *logrus.Entry, queryMap *config.Q
 				minDiff = diff
 			}
 		}
+
 		return github.StatusPending, fmt.Sprintf(statusNotInPool, minDiff)
 	}
 
@@ -276,7 +277,11 @@ func (sc *statusController) expectedStatus(log *logrus.Entry, queryMap *config.Q
 		if len(diff) > 1 {
 			s = "s"
 		}
-		return github.StatePending, fmt.Sprintf(statusNotInPool, fmt.Sprintf(" Waiting for retest of Job%s %v", s, diff))
+		msg := fmt.Sprintf(statusNotInPool, fmt.Sprintf(" Waiting for retest of Job%s %v", s, diff))
+		if len(msg) > 140 {
+			msg = msg[0:139]
+		}
+		return github.StatePending, msg
 	}
 	return github.StatusSuccess, statusInPool
 }
