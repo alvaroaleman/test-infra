@@ -100,13 +100,7 @@ func newFakeGitHubClient(hasLabel, humanApproved bool, files []string, comments 
 	if hasLabel {
 		labels = append(labels, fmt.Sprintf("org/repo#%v:approved", prNumber))
 	}
-	events := []github.ListedIssueEvent{
-		{
-			Event: github.IssueActionLabeled,
-			Label: github.Label{Name: "approved"},
-			Actor: github.User{Login: "k8s-merge-robot"},
-		},
-	}
+	events := []github.ListedIssueEvent{}
 	if humanApproved {
 		events = append(
 			events,
@@ -1070,112 +1064,114 @@ Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a commen
 	}
 
 	for _, test := range tests {
-		fghc := newFakeGitHubClient(test.hasLabel, test.humanApproved, test.files, test.comments, test.reviews)
-		branch := "master"
-		if test.branch != "" {
-			branch = test.branch
-		}
+		t.Run(test.name, func(t *testing.T) {
+			fghc := newFakeGitHubClient(test.hasLabel, test.humanApproved, test.files, test.comments, test.reviews)
+			branch := "master"
+			if test.branch != "" {
+				branch = test.branch
+			}
 
-		rsa := !test.selfApprove
-		irs := !test.reviewActsAsApprove
-		if err := handle(
-			logrus.WithField("plugin", "approve"),
-			fghc,
-			fr,
-			config.GitHubOptions{
-				LinkURL: test.githubLinkURL,
-			},
-			&plugins.Approve{
-				Repos:               []string{"org/repo"},
-				RequireSelfApproval: &rsa,
-				IssueRequired:       test.needsIssue,
-				LgtmActsAsApprove:   test.lgtmActsAsApprove,
-				IgnoreReviewState:   &irs,
-			},
-			&state{
-				org:       "org",
-				repo:      "repo",
-				branch:    branch,
-				number:    prNumber,
-				body:      test.prBody,
-				author:    "cjwagner",
-				assignees: []github.User{{Login: "spxtr"}},
-			},
-		); err != nil {
-			t.Errorf("[%s] Unexpected error handling event: %v.", test.name, err)
-		}
+			rsa := !test.selfApprove
+			irs := !test.reviewActsAsApprove
+			if err := handle(
+				logrus.WithField("plugin", "approve"),
+				fghc,
+				fr,
+				config.GitHubOptions{
+					LinkURL: test.githubLinkURL,
+				},
+				&plugins.Approve{
+					Repos:               []string{"org/repo"},
+					RequireSelfApproval: &rsa,
+					IssueRequired:       test.needsIssue,
+					LgtmActsAsApprove:   test.lgtmActsAsApprove,
+					IgnoreReviewState:   &irs,
+				},
+				&state{
+					org:       "org",
+					repo:      "repo",
+					branch:    branch,
+					number:    prNumber,
+					body:      test.prBody,
+					author:    "cjwagner",
+					assignees: []github.User{{Login: "spxtr"}},
+				},
+			); err != nil {
+				t.Errorf("[%s] Unexpected error handling event: %v.", test.name, err)
+			}
 
-		if test.expectDelete {
-			if len(fghc.IssueCommentsDeleted) != 1 {
-				t.Errorf(
-					"[%s] Expected 1 notification to be deleted but %d notifications were deleted.",
-					test.name,
-					len(fghc.IssueCommentsDeleted),
-				)
-			}
-		} else {
-			if len(fghc.IssueCommentsDeleted) != 0 {
-				t.Errorf(
-					"[%s] Expected 0 notifications to be deleted but %d notification was deleted.",
-					test.name,
-					len(fghc.IssueCommentsDeleted),
-				)
-			}
-		}
-		if test.expectComment {
-			if len(fghc.IssueCommentsAdded) != 1 {
-				t.Errorf(
-					"[%s] Expected 1 notification to be added but %d notifications were added.",
-					test.name,
-					len(fghc.IssueCommentsAdded),
-				)
-			} else if expect, got := fmt.Sprintf("org/repo#%v:", prNumber)+test.expectedComment, fghc.IssueCommentsAdded[0]; test.expectedComment != "" && got != expect {
-				t.Errorf(
-					"[%s] Expected the created notification to be:\n%s\n\nbut got:\n%s\n\n",
-					test.name,
-					expect,
-					got,
-				)
-			}
-		} else {
-			if len(fghc.IssueCommentsAdded) != 0 {
-				t.Errorf(
-					"[%s] Expected 0 notifications to be added but %d notification was added.",
-					test.name,
-					len(fghc.IssueCommentsAdded),
-				)
-			}
-		}
-
-		labelAdded := false
-		for _, l := range fghc.IssueLabelsAdded {
-			if l == fmt.Sprintf("org/repo#%v:approved", prNumber) {
-				if labelAdded {
-					t.Errorf("[%s] The approved label was applied to a PR that already had it!", test.name)
+			if test.expectDelete {
+				if len(fghc.IssueCommentsDeleted) != 1 {
+					t.Errorf(
+						"[%s] Expected 1 notification to be deleted but %d notifications were deleted.",
+						test.name,
+						len(fghc.IssueCommentsDeleted),
+					)
 				}
-				labelAdded = true
-			}
-		}
-		if test.hasLabel {
-			labelAdded = false
-		}
-		toggled := labelAdded
-		for _, l := range fghc.IssueLabelsRemoved {
-			if l == fmt.Sprintf("org/repo#%v:approved", prNumber) {
-				if !test.hasLabel {
-					t.Errorf("[%s] The approved label was removed from a PR that doesn't have it!", test.name)
+			} else {
+				if len(fghc.IssueCommentsDeleted) != 0 {
+					t.Errorf(
+						"[%s] Expected 0 notifications to be deleted but %d notification was deleted.",
+						test.name,
+						len(fghc.IssueCommentsDeleted),
+					)
 				}
-				toggled = true
 			}
-		}
-		if test.expectToggle != toggled {
-			t.Errorf(
-				"[%s] Expected 'approved' label toggled: %t, but got %t.",
-				test.name,
-				test.expectToggle,
-				toggled,
-			)
-		}
+			if test.expectComment {
+				if len(fghc.IssueCommentsAdded) != 1 {
+					t.Errorf(
+						"[%s] Expected 1 notification to be added but %d notifications were added.",
+						test.name,
+						len(fghc.IssueCommentsAdded),
+					)
+				} else if expect, got := fmt.Sprintf("org/repo#%v:", prNumber)+test.expectedComment, fghc.IssueCommentsAdded[0]; test.expectedComment != "" && got != expect {
+					t.Errorf(
+						"[%s] Expected the created notification to be:\n%s\n\nbut got:\n%s\n\n",
+						test.name,
+						expect,
+						got,
+					)
+				}
+			} else {
+				if len(fghc.IssueCommentsAdded) != 0 {
+					t.Errorf(
+						"[%s] Expected 0 notifications to be added but %d notification was added.",
+						test.name,
+						len(fghc.IssueCommentsAdded),
+					)
+				}
+			}
+
+			labelAdded := false
+			for _, l := range fghc.IssueLabelsAdded {
+				if l == fmt.Sprintf("org/repo#%v:approved", prNumber) {
+					if labelAdded {
+						t.Errorf("[%s] The approved label was applied to a PR that already had it!", test.name)
+					}
+					labelAdded = true
+				}
+			}
+			if test.hasLabel {
+				labelAdded = false
+			}
+			toggled := labelAdded
+			for _, l := range fghc.IssueLabelsRemoved {
+				if l == fmt.Sprintf("org/repo#%v:approved", prNumber) {
+					if !test.hasLabel {
+						t.Errorf("[%s] The approved label was removed from a PR that doesn't have it!", test.name)
+					}
+					toggled = true
+				}
+			}
+			if test.expectToggle != toggled {
+				t.Errorf(
+					"[%s] Expected 'approved' label toggled: %t, but got %t.",
+					test.name,
+					test.expectToggle,
+					toggled,
+				)
+			}
+		})
 	}
 }
 
