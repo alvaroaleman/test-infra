@@ -23,6 +23,8 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
+	"k8s.io/test-infra/ghproxy/api"
 )
 
 type roundTripperCreator func(partitionKey string) http.RoundTripper
@@ -45,6 +47,9 @@ type partitioningRoundTripper struct {
 }
 
 func getCachePartition(r *http.Request) string {
+	if val := r.Header.Get(api.HeaderUserIdentifier); val != "" {
+		return val
+	}
 	// Hash the key to make sure we dont leak it into the directory layout
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(r.Header.Get("Authorization"))))
 }

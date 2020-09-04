@@ -23,6 +23,8 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
+	"k8s.io/test-infra/ghproxy/api"
 )
 
 // Hasher knows how to hash an authorization header from a request
@@ -43,6 +45,9 @@ type cachingHasher struct {
 }
 
 func (h *cachingHasher) Hash(req *http.Request) string {
+	if val := req.Header.Get(api.HeaderUserIdentifier); val != "" {
+		return val
+	}
 	// get authorization header to convert to sha256
 	authHeader := req.Header.Get("Authorization")
 	if authHeader == "" {

@@ -18,13 +18,17 @@ package flagutil
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/sirupsen/logrus"
+
 	"k8s.io/test-infra/prow/config/secret"
 	"k8s.io/test-infra/prow/git"
 	"k8s.io/test-infra/prow/github"
@@ -146,15 +150,27 @@ func (o *GitHubOptions) GitClient(secretAgent *secret.Agent, dryRun bool) (clien
 	}(client)
 
 	// Get the bot's name in order to set credentials for the Git client.
-	githubClient, err := o.GitHubClient(secretAgent, dryRun)
-	if err != nil {
-		return nil, fmt.Errorf("error getting GitHub client: %v", err)
+	//	githubClient, err := o.GitHubClient(secretAgent, dryRun)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("error getting GitHub client: %v", err)
+	//	}
+	//	botName, err := githubClient.BotName()
+	//	if err != nil {
+	//		return nil, fmt.Errorf("error getting bot name: %v", err)
+	//	}
+	generator := func() []byte {
+		appsTransport, err := ghinstallation.NewAppsTransport(http.DefaultTransport, 79644, secretAgent.GetTokenGenerator(o.TokenPath)())
+		if err != nil {
+			panic(fmt.Sprintf("constructing transport: %s", err))
+		}
+		installationTransport := ghinstallation.NewFromAppsTransport(appsTransport, 11625174)
+		token, err := installationTransport.Token(context.Background())
+		if err != nil {
+			panic(fmt.Sprintf("getting token: %s", token))
+		}
+		return []byte(token)
 	}
-	botName, err := githubClient.BotName()
-	if err != nil {
-		return nil, fmt.Errorf("error getting bot name: %v", err)
-	}
-	client.SetCredentials(botName, secretAgent.GetTokenGenerator(o.TokenPath))
+	client.SetCredentials("x-access-token", generator)
 
 	return client, nil
 }

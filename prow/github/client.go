@@ -19,7 +19,7 @@ package github
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
+	_ "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -35,15 +35,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bradleyfalzon/ghinstallation"
+	jwt "github.com/dgrijalva/jwt-go/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"k8s.io/test-infra/ghproxy/ghcache"
 	"k8s.io/test-infra/prow/version"
+
+	ghproxyapi "k8s.io/test-infra/ghproxy/api"
 )
 
 type timeClient interface {
@@ -259,14 +264,15 @@ type delegate struct {
 	maxSleepTime  time.Duration
 	initialDelay  time.Duration
 
-	gqlc     gqlClient
-	client   httpClient
-	bases    []string
-	dry      bool
-	fake     bool
-	throttle throttler
-	getToken func() []byte
-	censor   func([]byte) []byte
+	gqlc      gqlClient
+	client    httpClient
+	bases     []string
+	dry       bool
+	fake      bool
+	throttle  throttler
+	githubApp bool
+	getToken  func() []byte
+	censor    func([]byte) []byte
 
 	mut      sync.Mutex // protects botName and email
 	userData *User
@@ -478,6 +484,16 @@ func (c *client) SetMax404Retries(max int) {
 //   This should be used when using the ghproxy GitHub proxy cache to allow
 //   this client to bypass the cache if it is temporarily unavailable.
 func NewClientWithFields(fields logrus.Fields, getToken func() []byte, censor func([]byte) []byte, graphqlEndpoint string, bases ...string) Client {
+	appsTransport, err := ghinstallation.NewAppsTransport(&loggingTransport{http.DefaultTransport}, 79644, getToken())
+	if err != nil {
+		panic(fmt.Sprintf("constructing transport: %s", err))
+	}
+	transport := &githubAppsTransport{
+		appID:                 79644,
+		instanceID:            11625174,
+		appsTransport:         appsTransport,
+		installationTransport: ghinstallation.NewFromAppsTransport(appsTransport, 11625174),
+	}
 	return &client{
 		logger: logrus.WithFields(fields).WithField("client", "github"),
 		delegate: &delegate{
@@ -486,10 +502,11 @@ func NewClientWithFields(fields logrus.Fields, getToken func() []byte, censor fu
 				graphqlEndpoint,
 				&http.Client{
 					Timeout:   maxRequestTime,
-					Transport: &oauth2.Transport{Source: newReloadingTokenSource(getToken)},
+					Transport: transport,
 				}),
-			client:        &http.Client{Timeout: maxRequestTime},
+			client:        &http.Client{Timeout: maxRequestTime, Transport: transport},
 			bases:         bases,
+			githubApp:     true,
 			getToken:      getToken,
 			censor:        censor,
 			dry:           false,
@@ -499,6 +516,32 @@ func NewClientWithFields(fields logrus.Fields, getToken func() []byte, censor fu
 			maxSleepTime:  defaultMaxSleepTime,
 		},
 	}
+}
+
+type loggingTransport struct {
+	upstream http.RoundTripper
+}
+
+func (lg *loggingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	fmt.Println(toCurl(r))
+	return lg.upstream.RoundTrip(r)
+}
+
+type githubAppsTransport struct {
+	appID, instanceID     int
+	appsTransport         http.RoundTripper
+	installationTransport http.RoundTripper
+}
+
+var appTransportURIs = sets.NewString("/app")
+
+func (at *githubAppsTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if appTransportURIs.Has(r.URL.Path) {
+		r.Header.Set(ghproxyapi.HeaderUserIdentifier, strconv.Itoa(at.appID))
+		return at.appsTransport.RoundTrip(r)
+	}
+	r.Header.Set(ghproxyapi.HeaderUserIdentifier, fmt.Sprintf("%d-%d", at.appID, at.instanceID))
+	return at.installationTransport.RoundTrip(r)
 }
 
 // NewClient creates a new fully operational GitHub client.
@@ -697,6 +740,18 @@ func (c *client) requestRetry(method, path, accept string, body interface{}) (*h
 			resp.Body.Close()
 		}
 		resp, err = c.doRequest(method, c.bases[hostIndex]+path, accept, body)
+		if resp != nil && resp.Body != nil {
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				c.logger.WithError(err).Error("failed to read resp body")
+			}
+			if err := resp.Body.Close(); err != nil {
+				c.logger.WithError(err).Error("failed to close resp body")
+			}
+			resp.Body = ioutil.NopCloser(bytes.NewBufferString(string(body)))
+			rJ, _ := json.Marshal(body)
+			fmt.Printf("response: %s\n", string(rJ))
+		}
 		if err == nil {
 			if resp.StatusCode == 404 && retries < c.max404Retries {
 				// Retry 404s a couple times. Sometimes GitHub is inconsistent in
@@ -799,7 +854,11 @@ func (c *client) doRequest(method, path, accept string, body interface{}) (*http
 	if err != nil {
 		return nil, err
 	}
-	if header := c.authHeader(); len(header) > 0 {
+	header, err := c.authHeader()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth header: %w", err)
+	}
+	if header != "" {
 		req.Header.Set("Authorization", header)
 	}
 	if accept == acceptNone {
@@ -818,12 +877,44 @@ func (c *client) doRequest(method, path, accept string, body interface{}) (*http
 	return c.client.Do(req)
 }
 
-func (c *client) authHeader() string {
+func toCurl(r *http.Request) string {
+	headers := ""
+	for key, values := range r.Header {
+		for _, value := range values {
+			headers += fmt.Sprintf(` -H %q`, fmt.Sprintf("%s: %s", key, value))
+		}
+	}
+
+	return fmt.Sprintf("curl -k -v -X%s %s '%s'", r.Method, headers, r.URL.String())
+}
+
+var _ jwt.Claims = nil
+
+func (c *client) authHeader() (string, error) {
 	token := c.getToken()
 	if len(token) == 0 {
-		return ""
+		return "", nil
 	}
-	return fmt.Sprintf("Bearer %s", token)
+	if c.githubApp {
+		return "", nil
+		//	key, err := jwt.ParseRSAPrivateKeyFromPEM(token)
+		//	if err != nil {
+		//		return "", fmt.Errorf("could not parse private key: %w", err)
+		//	}
+		//	claims := &jwt.StandardClaims{
+		//		IssuedAt:  jwt.NewTime(float64(time.Now().Unix())),
+		//		ExpiresAt: jwt.NewTime(float64(time.Now().UTC().Add(9 * time.Minute).Unix())),
+		//		Issuer:    "79644",
+		//	}
+		//	bearer := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		//	tokenString, err := bearer.SignedString(key)
+		//	if err != nil {
+		//		return "", fmt.Errorf("could not sign jwt: %w", err)
+		//	}
+		//	return fmt.Sprintf("Bearer %s", tokenString), nil
+
+	}
+	return fmt.Sprintf("Bearer %s", token), nil
 }
 
 // userInfo provides the 'github_user_info' vector that is indexed
@@ -842,15 +933,33 @@ func init() {
 
 // Not thread-safe - callers need to hold c.mut.
 func (c *client) getUserData() error {
-	c.log("User")
 	var u User
-	_, err := c.request(&request{
-		method:    http.MethodGet,
-		path:      "/user",
-		exitCodes: []int{200},
-	}, &u)
-	if err != nil {
-		return err
+	if !c.githubApp {
+		c.log("User")
+		_, err := c.request(&request{
+			method:    http.MethodGet,
+			path:      "/user",
+			exitCodes: []int{200},
+		}, &u)
+		if err != nil {
+			return err
+		}
+	} else {
+		c.log("App")
+		var a App
+		_, err := c.request(&request{
+			method:    http.MethodGet,
+			path:      "/app",
+			accept:    "application/vnd.github.machine-man-preview+json",
+			exitCodes: []int{200},
+		}, &a)
+		if err != nil {
+			return err
+		}
+		// The github comment author is named '${app}[bot]' so we add that suffix here
+		// to keep our author matching for comments working.
+		// TODO: TDoes this break other things? git access doesn't need the username so that should be fine
+		u.Login = a.Slug + "[bot]"
 	}
 	c.userData = &u
 	// email needs to be publicly accessible via the profile
@@ -858,8 +967,8 @@ func (c *client) getUserData() error {
 	// https://developer.github.com/v3/users/#get-a-single-user
 
 	// record information for the user
-	authHeaderHash := fmt.Sprintf("%x", sha256.Sum256([]byte(c.authHeader()))) // use %x to make this a utf-8 string for use as a label
-	userInfo.With(prometheus.Labels{"token_hash": authHeaderHash, "login": c.userData.Login, "email": c.userData.Email}).Set(1)
+	//authHeaderHash := fmt.Sprintf("%x", sha256.Sum256([]byte(c.authHeader()))) // use %x to make this a utf-8 string for use as a label
+	//userInfo.With(prometheus.Labels{"token_hash": authHeaderHash, "login": c.userData.Login, "email": c.userData.Email}).Set(1)
 	return nil
 }
 

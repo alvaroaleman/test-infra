@@ -167,6 +167,22 @@ type User struct {
 	Type        string          `json:"type"`
 }
 
+type App struct {
+	ID                int               `json:"id"`
+	Slug              string            `json:"slug"`
+	NodeID            string            `json:"node_id"`
+	Owner             User              `json:"owner"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	ExternalURL       string            `json:"external_url"`
+	HTMLURL           string            `json:"html_url"`
+	CreatedAt         string            `json:"created_at"`
+	UpdatedAt         string            `json:"updated_at"`
+	Permisisons       map[string]string `json:"permissions"`
+	Events            []string          `json:"events"`
+	InstallationCount uint              `json:"installations_count"`
+}
+
 const (
 	// UserTypeUser identifies an actual user account in the User.Type field
 	UserTypeUser = "User"

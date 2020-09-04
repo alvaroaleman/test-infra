@@ -58,6 +58,7 @@ filegroup(
     name = "all-srcs",
     srcs = [
         ":package-srcs",
+        "//ghproxy/api:all-srcs",
         "//ghproxy/ghcache:all-srcs",
         "//ghproxy/ghmetrics:all-srcs",
     ],
