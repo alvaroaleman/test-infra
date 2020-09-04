@@ -696,14 +696,6 @@ def go_repositories():
     )
 
     go_repository(
-        name = "com_github_dgrijalva_jwt_go_v4",
-        build_file_generation = "on",
-        build_file_proto_mode = "disable",
-        importpath = "github.com/dgrijalva/jwt-go/v4",
-        sum = "h1:CaO/zOnF8VvUfEbhRatPcwKVWamvbYd8tQGRWacE9kU=",
-        version = "v4.0.0-preview1",
-    )
-    go_repository(
         name = "com_github_bradleyfalzon_ghinstallation",
         build_file_generation = "on",
         build_file_proto_mode = "disable",
@@ -5226,4 +5218,12 @@ def go_repositories():
         importpath = "gomodules.xyz/jsonpatch/v2",
         sum = "h1:Phva6wqu+xR//Njw6iorylFFgn/z547tw5Ne3HZPQ+k=",
         version = "v2.1.0",
+    )
+    go_repository(
+        name = "com_github_dgrijalva_jwt_go_v4",
+        build_file_generation = "on",
+        build_file_proto_mode = "disable",
+        importpath = "github.com/dgrijalva/jwt-go/v4",
+        sum = "h1:CaO/zOnF8VvUfEbhRatPcwKVWamvbYd8tQGRWacE9kU=",
+        version = "v4.0.0-preview1",
     )

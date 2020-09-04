@@ -163,6 +163,9 @@ func (o *GitHubOptions) GitClient(secretAgent *secret.Agent, dryRun bool) (clien
 		if err != nil {
 			panic(fmt.Sprintf("constructing transport: %s", err))
 		}
+		// TODO: Infer installationID and associated token dynamically, reusing whats in github/appinstallationauth.go, the
+		// ghinstallation lib has no functionality to dynammically resolve the installationID, can not cope with multiple
+		// endpoints and doesn't do any kind of retrying.
 		installationTransport := ghinstallation.NewFromAppsTransport(appsTransport, 11625174)
 		token, err := installationTransport.Token(context.Background())
 		if err != nil {

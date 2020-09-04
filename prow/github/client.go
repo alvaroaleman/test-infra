@@ -19,7 +19,6 @@ package github
 import (
 	"bytes"
 	"context"
-	_ "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -35,20 +34,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation"
 	jwt "github.com/dgrijalva/jwt-go/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 
+	ghproxyapi "k8s.io/test-infra/ghproxy/api"
 	"k8s.io/test-infra/ghproxy/ghcache"
 	"k8s.io/test-infra/prow/version"
-
-	ghproxyapi "k8s.io/test-infra/ghproxy/api"
 )
 
 type timeClient interface {
@@ -276,6 +272,8 @@ type delegate struct {
 
 	mut      sync.Mutex // protects botName and email
 	userData *User
+
+	appInstallationIDCache *installationIDCache
 }
 
 // ForPlugin clones the client, keeping the underlying delegate the same but adding
@@ -484,27 +482,18 @@ func (c *client) SetMax404Retries(max int) {
 //   This should be used when using the ghproxy GitHub proxy cache to allow
 //   this client to bypass the cache if it is temporarily unavailable.
 func NewClientWithFields(fields logrus.Fields, getToken func() []byte, censor func([]byte) []byte, graphqlEndpoint string, bases ...string) Client {
-	appsTransport, err := ghinstallation.NewAppsTransport(&loggingTransport{http.DefaultTransport}, 79644, getToken())
-	if err != nil {
-		panic(fmt.Sprintf("constructing transport: %s", err))
-	}
-	transport := &githubAppsTransport{
-		appID:                 79644,
-		instanceID:            11625174,
-		appsTransport:         appsTransport,
-		installationTransport: ghinstallation.NewFromAppsTransport(appsTransport, 11625174),
-	}
-	return &client{
+	c := &client{
 		logger: logrus.WithFields(fields).WithField("client", "github"),
 		delegate: &delegate{
 			time: &standardTime{},
+			// TODO: We need to build a wrapper that dissasembles the query and shards it by installationID, then combines the result
 			gqlc: githubql.NewEnterpriseClient(
 				graphqlEndpoint,
 				&http.Client{
 					Timeout:   maxRequestTime,
-					Transport: transport,
+					Transport: &loggingTransport{http.DefaultTransport},
 				}),
-			client:        &http.Client{Timeout: maxRequestTime, Transport: transport},
+			client:        &http.Client{Timeout: maxRequestTime, Transport: &loggingTransport{http.DefaultTransport}},
 			bases:         bases,
 			githubApp:     true,
 			getToken:      getToken,
@@ -516,6 +505,8 @@ func NewClientWithFields(fields logrus.Fields, getToken func() []byte, censor fu
 			maxSleepTime:  defaultMaxSleepTime,
 		},
 	}
+	c.appInstallationIDCache = newInstallationIDCache(c)
+	return c
 }
 
 type loggingTransport struct {
@@ -523,25 +514,8 @@ type loggingTransport struct {
 }
 
 func (lg *loggingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	fmt.Println(toCurl(r))
+	logrus.WithField("curl command", toCurl(r)).Info("Curl")
 	return lg.upstream.RoundTrip(r)
-}
-
-type githubAppsTransport struct {
-	appID, instanceID     int
-	appsTransport         http.RoundTripper
-	installationTransport http.RoundTripper
-}
-
-var appTransportURIs = sets.NewString("/app")
-
-func (at *githubAppsTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if appTransportURIs.Has(r.URL.Path) {
-		r.Header.Set(ghproxyapi.HeaderUserIdentifier, strconv.Itoa(at.appID))
-		return at.appsTransport.RoundTrip(r)
-	}
-	r.Header.Set(ghproxyapi.HeaderUserIdentifier, fmt.Sprintf("%d-%d", at.appID, at.instanceID))
-	return at.installationTransport.RoundTrip(r)
 }
 
 // NewClient creates a new fully operational GitHub client.
@@ -750,7 +724,7 @@ func (c *client) requestRetry(method, path, accept string, body interface{}) (*h
 			}
 			resp.Body = ioutil.NopCloser(bytes.NewBufferString(string(body)))
 			rJ, _ := json.Marshal(body)
-			fmt.Printf("response: %s\n", string(rJ))
+			c.logger.WithField("response", string(rJ)).Info("Logging response")
 		}
 		if err == nil {
 			if resp.StatusCode == 404 && retries < c.max404Retries {
@@ -854,7 +828,7 @@ func (c *client) doRequest(method, path, accept string, body interface{}) (*http
 	if err != nil {
 		return nil, err
 	}
-	header, err := c.authHeader()
+	header, err := c.authHeader(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth header: %w", err)
 	}
@@ -877,6 +851,7 @@ func (c *client) doRequest(method, path, accept string, body interface{}) (*http
 	return c.client.Do(req)
 }
 
+// Straight copy from https://github.com/kubernetes/kubernetes/blob/74053d555d71a14e3853b97e204d7d6415521375/staging/src/k8s.io/client-go/transport/round_trippers.go#L338
 func toCurl(r *http.Request) string {
 	headers := ""
 	for key, values := range r.Header {
@@ -888,33 +863,53 @@ func toCurl(r *http.Request) string {
 	return fmt.Sprintf("curl -k -v -X%s %s '%s'", r.Method, headers, r.URL.String())
 }
 
-var _ jwt.Claims = nil
+// TODO: Plug this through, needs to be a CLI arg (if set, we can infer from that that we should run in app mode)
+const appID = "79644"
 
-func (c *client) authHeader() (string, error) {
+func (c *client) authHeader(req *http.Request) (string, error) {
 	token := c.getToken()
 	if len(token) == 0 {
 		return "", nil
 	}
 	if c.githubApp {
-		return "", nil
-		//	key, err := jwt.ParseRSAPrivateKeyFromPEM(token)
-		//	if err != nil {
-		//		return "", fmt.Errorf("could not parse private key: %w", err)
-		//	}
-		//	claims := &jwt.StandardClaims{
-		//		IssuedAt:  jwt.NewTime(float64(time.Now().Unix())),
-		//		ExpiresAt: jwt.NewTime(float64(time.Now().UTC().Add(9 * time.Minute).Unix())),
-		//		Issuer:    "79644",
-		//	}
-		//	bearer := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-		//	tokenString, err := bearer.SignedString(key)
-		//	if err != nil {
-		//		return "", fmt.Errorf("could not sign jwt: %w", err)
-		//	}
-		//	return fmt.Sprintf("Bearer %s", tokenString), nil
+		fmt.Printf("Checking path %s\n", req.URL.Path)
+		if strings.HasPrefix(req.URL.Path, "/app") {
+			// TODO: Parse this key at load time instead of during all requests
+			// (But is it a big deal? Most requests need an installation token)
+			key, err := jwt.ParseRSAPrivateKeyFromPEM(c.getToken())
+			if err != nil {
+				return "", fmt.Errorf("could not parse private key: %w", err)
+			}
+			claims := &jwt.StandardClaims{
+				IssuedAt:  jwt.NewTime(float64(time.Now().Unix())),
+				ExpiresAt: jwt.NewTime(float64(time.Now().UTC().Add(10 * time.Minute).Unix())),
+				Issuer:    appID,
+			}
+			bearer := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+			signed, err := bearer.SignedString(key)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse bearer token: %w", err)
+			}
+			req.Header.Set(ghproxyapi.HeaderUserIdentifier, appID)
+			return "Bearer " + signed, nil
+		}
+		// TODO: Pass through or infer org/repo from all calls
+		// TODO: The serializing of all appIDToken requests means that if for whatever rason
+		// we end up in the token retrieval path during retrieval the whole client gets
+		// completely stuck. We should somehow detect that (Passing a Header around?)
+		token, installationID, err := c.appInstallationIDCache.get("alvaro-bot-prow", "")
+		req.Header.Set(ghproxyapi.HeaderUserIdentifier, appID+"-"+installationID)
+		return "token " + token, err
 
 	}
 	return fmt.Sprintf("Bearer %s", token), nil
+}
+
+type AppToken struct {
+	Token        string            `json:"token"`
+	ExpiresAt    time.Time         `json:"expires_at"`
+	Permissions  map[string]string `json:"permissions,omitempty"`
+	Repositories []Repo            `json:"repositories,omitempty"`
 }
 
 // userInfo provides the 'github_user_info' vector that is indexed
@@ -970,6 +965,34 @@ func (c *client) getUserData() error {
 	//authHeaderHash := fmt.Sprintf("%x", sha256.Sum256([]byte(c.authHeader()))) // use %x to make this a utf-8 string for use as a label
 	//userInfo.With(prometheus.Labels{"token_hash": authHeaderHash, "login": c.userData.Login, "email": c.userData.Email}).Set(1)
 	return nil
+}
+
+func (c *client) getAppInstallations() ([]AppInstallation, error) {
+	c.log("AppInstallation")
+	var ais []AppInstallation
+	if _, err := c.request(&request{
+		method:    http.MethodGet,
+		path:      "/app/installations",
+		accept:    "application/vnd.github.machine-man-preview+json",
+		exitCodes: []int{200},
+	}, &ais); err != nil {
+		return nil, err
+	}
+	return ais, nil
+}
+
+func (c *client) getAppInstallationToken(installationId int) (*AppToken, error) {
+	c.log("AppInstallationToken")
+	var token AppToken
+	if _, err := c.request(&request{
+		method:    http.MethodPost,
+		path:      fmt.Sprintf("/app/installations/%d/access_tokens", installationId),
+		exitCodes: []int{201},
+	}, &token); err != nil {
+		return nil, err
+	}
+
+	return &token, nil
 }
 
 // BotName returns the login of the authenticated identity.

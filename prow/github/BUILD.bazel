@@ -28,6 +28,7 @@ go_test(
 go_library(
     name = "go_default_library",
     srcs = [
+        "appinstallationauth.go",
         "client.go",
         "helpers.go",
         "hmac.go",
@@ -40,13 +41,11 @@ go_library(
         "//ghproxy/api:go_default_library",
         "//ghproxy/ghcache:go_default_library",
         "//prow/version:go_default_library",
-        "@com_github_bradleyfalzon_ghinstallation//:go_default_library",
         "@com_github_dgrijalva_jwt_go_v4//:go_default_library",
         "@com_github_prometheus_client_golang//prometheus:go_default_library",
         "@com_github_shurcool_githubv4//:go_default_library",
         "@com_github_sirupsen_logrus//:go_default_library",
         "@io_k8s_apimachinery//pkg/util/errors:go_default_library",
-        "@io_k8s_apimachinery//pkg/util/sets:go_default_library",
         "@io_k8s_sigs_yaml//:go_default_library",
         "@org_golang_x_oauth2//:go_default_library",
     ],

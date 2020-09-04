@@ -183,6 +183,37 @@ type App struct {
 	InstallationCount uint              `json:"installations_count"`
 }
 
+type AppInstallation struct {
+	ID              int        `json:"id"`
+	Account         AppAccount `json:"account"`
+	AccessTokensURL string     `json:"access_tokens_url"`
+	RepositoriesURL string     `json:"repositories_url"`
+	HTMLURL         string     `json:"html_url"`
+	AppID           int        `json:"app_id"`
+	TargetID        int        `json:"target_id"`
+	// TODO: Is this actually a free form string or one of organization/repo?
+	TargetType          string            `json:"organization"`
+	Permissions         map[string]string `json:"permissions"`
+	Events              []string          `json:"events"`
+	SingleFileName      string            `json:"single_file_name"`
+	RepositorySelection string            `json:"repository_selection"`
+}
+
+type AppAccount struct {
+	Login            string `json:"login"`
+	ID               int    `json:"id"`
+	NodeID           string `json:"node_id"`
+	URL              string `json:"url"`
+	ReposURL         string `json:"repos_url"`
+	EventsURL        string `json:"events_url"`
+	HooksURL         string `json:"hooks_url"`
+	IssuesURL        string `json:"issues_url"`
+	MembersURL       string `json:"members_url"`
+	PublicMembersURL string `json:"public_members_url"`
+	AvatarURL        string `json:"avatar_url"`
+	Description      string `json:"description"`
+}
+
 const (
 	// UserTypeUser identifies an actual user account in the User.Type field
 	UserTypeUser = "User"
