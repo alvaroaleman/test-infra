@@ -74,7 +74,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5
-	github.com/tektoncd/pipeline v0.13.1-0.20200625065359-44f22a067b75
+	github.com/tektoncd/pipeline v0.14.1-0.20200710073957-5eeb17f81999
 	go.uber.org/zap v1.15.0
 	gocloud.dev v0.19.0
 	golang.org/x/crypto v0.0.0-20201002170205-7f63de1d35b0
