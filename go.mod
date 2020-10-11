@@ -100,6 +100,8 @@ require (
 	mvdan.cc/xurls/v2 v2.0.0
 	sigs.k8s.io/boskos v0.0.0-20200617235605-f289ba6555ba
 	sigs.k8s.io/controller-runtime v0.8.1-0.20210115141952-3c5b3583fd30
+	sigs.k8s.io/controller-tools v0.4.0
+	sigs.k8s.io/structured-merge-diff/v3 v3.0.1-0.20200706213357-43c19bbb7fba // indirect
 	sigs.k8s.io/yaml v1.2.0
 )
 
