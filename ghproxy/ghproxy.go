@@ -30,6 +30,7 @@ import (
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"k8s.io/test-infra/ghproxy/apptokenequalizer"
 	"k8s.io/test-infra/ghproxy/ghcache"
 	"k8s.io/test-infra/greenhouse/diskutil"
 	"k8s.io/test-infra/prow/config"
@@ -144,11 +145,11 @@ func main() {
 
 	var cache http.RoundTripper
 	if o.redisAddress != "" {
-		cache = ghcache.NewRedisCache(http.DefaultTransport, o.redisAddress, o.maxConcurrency)
+		cache = ghcache.NewRedisCache(apptokenequalizer.New(http.DefaultTransport), o.redisAddress, o.maxConcurrency)
 	} else if o.dir == "" {
-		cache = ghcache.NewMemCache(http.DefaultTransport, o.maxConcurrency)
+		cache = ghcache.NewMemCache(apptokenequalizer.New(http.DefaultTransport), o.maxConcurrency)
 	} else {
-		cache = ghcache.NewDiskCache(http.DefaultTransport, o.dir, o.sizeGB, o.maxConcurrency, o.diskCacheDisableAuthHeaderPartitioning)
+		cache = ghcache.NewDiskCache(apptokenequalizer.New(http.DefaultTransport), o.dir, o.sizeGB, o.maxConcurrency, o.diskCacheDisableAuthHeaderPartitioning)
 		go diskMonitor(o.pushGatewayInterval, o.dir)
 	}
 
