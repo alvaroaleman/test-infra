@@ -2519,8 +2519,14 @@ type orgHeaderCheckingRoundTripper struct {
 }
 
 func (rt orgHeaderCheckingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	if !strings.HasPrefix(r.URL.Path, "/app") && r.Context().Value(githubOrgHeaderKey).(string) != "org" {
-		rt.t.Errorf("Request didn't have %s header set to 'org'", githubOrgHeaderKey)
+	if !strings.HasPrefix(r.URL.Path, "/app") {
+		var orgVal string
+		if v := r.Context().Value(githubOrgHeaderKey); v != nil {
+			orgVal = v.(string)
+		}
+		if orgVal != "org" {
+			rt.t.Errorf("Request didn't have %s header set to 'org'", githubOrgHeaderKey)
+		}
 	}
 	return &http.Response{Body: ioutil.NopCloser(&bytes.Buffer{})}, nil
 }
@@ -2529,7 +2535,7 @@ func (rt orgHeaderCheckingRoundTripper) RoundTrip(r *http.Request) (*http.Respon
 // their arguments and calls them with an empty argument, then verifies via a RoundTripper that
 // all requests made had an org header set.
 func TestAllMethodsThatDoRequestSetOrgHeader(t *testing.T) {
-	_, ghClient := NewAppsAuthClientWithFields(logrus.Fields{}, func(_ []byte) []byte { return nil }, "", func() *rsa.PrivateKey { return nil }, "", "")
+	_, ghClient := NewAppsAuthClientWithFields(logrus.Fields{}, func(_ []byte) []byte { return nil }, "some-app-id", func() *rsa.PrivateKey { return nil }, "", "")
 	clientType := reflect.TypeOf(ghClient)
 	stringType := reflect.TypeOf("")
 	stringValue := reflect.ValueOf("org")
@@ -2538,11 +2544,6 @@ func TestAllMethodsThatDoRequestSetOrgHeader(t *testing.T) {
 		// Doesn't support github apps
 		"Query",
 		// They fetch the user, which doesn't exist in case of github app.
-		// TODO: Redirect these to /app when app auth is used
-		"BotName",
-		"BotUser",
-		// GitHub apps do not have an email
-		"Email",
 		// TODO: Split the search query by org when app auth is used
 		"FindIssues",
 	)
