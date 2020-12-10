@@ -19,6 +19,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/diff"
@@ -2517,7 +2519,7 @@ type orgHeaderCheckingRoundTripper struct {
 }
 
 func (rt orgHeaderCheckingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	if !strings.HasPrefix(r.URL.Path, "/app") && r.Header.Get(githubOrgHeaderKey) != "org" {
+	if !strings.HasPrefix(r.URL.Path, "/app") && r.Context().Value(githubOrgHeaderKey).(string) != "org" {
 		rt.t.Errorf("Request didn't have %s header set to 'org'", githubOrgHeaderKey)
 	}
 	return &http.Response{Body: ioutil.NopCloser(&bytes.Buffer{})}, nil
@@ -2527,7 +2529,7 @@ func (rt orgHeaderCheckingRoundTripper) RoundTrip(r *http.Request) (*http.Respon
 // their arguments and calls them with an empty argument, then verifies via a RoundTripper that
 // all requests made had an org header set.
 func TestAllMethodsThatDoRequestSetOrgHeader(t *testing.T) {
-	ghClient := NewClient(func() []byte { return nil }, func(in []byte) []byte { return in }, "", "")
+	_, ghClient := NewAppsAuthClientWithFields(logrus.Fields{}, func(_ []byte) []byte { return nil }, "", func() *rsa.PrivateKey { return nil }, "", "")
 	clientType := reflect.TypeOf(ghClient)
 	stringType := reflect.TypeOf("")
 	stringValue := reflect.ValueOf("org")
@@ -2551,7 +2553,9 @@ func TestAllMethodsThatDoRequestSetOrgHeader(t *testing.T) {
 		}
 		t.Run(clientType.Method(i).Name, func(t *testing.T) {
 
-			ghClient.(*client).client.(*http.Client).Transport = &orgHeaderCheckingRoundTripper{t}
+			checkindRoundTripper := &orgHeaderCheckingRoundTripper{t}
+			ghClient.(*client).client.(*http.Client).Transport = checkindRoundTripper
+			ghClient.(*client).gqlc.(*graphQLGithubAppsAuthClientWrapper).Client = githubv4.NewClient(&http.Client{Transport: checkindRoundTripper})
 			clientValue := reflect.ValueOf(ghClient)
 
 			var args []reflect.Value
@@ -2564,6 +2568,16 @@ func TestAllMethodsThatDoRequestSetOrgHeader(t *testing.T) {
 
 				if arg.Type() == stringType {
 					arg.Set(stringValue)
+				}
+
+				// We can not deal with interface types genererically, as there
+				// is no automatic way to figure out the concrete values they
+				// can or should be set to.
+				if arg.Type().String() == "context.Context" {
+					arg.Set(reflect.ValueOf(context.Background()))
+				}
+				if arg.Type().String() == "interface {}" {
+					arg.Set(reflect.ValueOf(map[string]interface{}{}))
 				}
 
 				// Just set all strings to a nonEmpty string, otherwise the header will not get set

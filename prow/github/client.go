@@ -238,6 +238,7 @@ type Client interface {
 
 	Throttle(hourlyTokens, burst int)
 	Query(ctx context.Context, q interface{}, vars map[string]interface{}) error
+	QueryWithGithubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error
 
 	SetMax404Retries(int)
 
@@ -345,7 +346,7 @@ type httpClient interface {
 
 // Interface for how prow interacts with the graphql client, which we may throttle.
 type gqlClient interface {
-	Query(ctx context.Context, q interface{}, vars map[string]interface{}) error
+	QueryWithGithubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error
 }
 
 // throttler sets a ceiling on the rate of GitHub requests.
@@ -424,10 +425,14 @@ func (t *throttler) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (t *throttler) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+	return t.QueryWithGithubAppsSupport(ctx, q, vars, "")
+}
+
+func (t *throttler) QueryWithGithubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
 	t.Wait()
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	return t.graph.Query(ctx, q, vars)
+	return t.graph.QueryWithGithubAppsSupport(ctx, q, vars, org)
 }
 
 // Throttle client to a rate of at most hourlyTokens requests per hour,
@@ -507,7 +512,7 @@ func newClient(fields logrus.Fields, getToken func() []byte, censor func([]byte)
 		logger: logrus.WithFields(fields).WithField("client", "github"),
 		delegate: &delegate{
 			time: &standardTime{},
-			gqlc: githubql.NewEnterpriseClient(
+			gqlc: &graphQLGithubAppsAuthClientWrapper{githubql.NewEnterpriseClient(
 				graphqlEndpoint,
 				&http.Client{
 					Timeout: maxRequestTime,
@@ -515,7 +520,7 @@ func newClient(fields logrus.Fields, getToken func() []byte, censor func([]byte)
 						Source: newReloadingTokenSource(getToken),
 						Base:   graphQLTransport,
 					},
-				}),
+				})},
 			client:        httpClient,
 			bases:         bases,
 			getToken:      getToken,
@@ -540,6 +545,15 @@ func newClient(fields logrus.Fields, getToken func() []byte, censor func([]byte)
 	}
 
 	return appsTokenGenerator, c
+}
+
+type graphQLGithubAppsAuthClientWrapper struct {
+	*githubql.Client
+}
+
+func (c *graphQLGithubAppsAuthClientWrapper) QueryWithGithubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
+	ctx = context.WithValue(ctx, githubOrgHeaderKey, org)
+	return c.Client.Query(ctx, q, vars)
 }
 
 // addHeaderTransport implements http.RoundTripper
@@ -867,7 +881,7 @@ func (c *client) doRequest(method, path, accept, org string, body interface{}) (
 		req.Header.Add("User-Agent", userAgent)
 	}
 	if org != "" {
-		req.Header.Set(githubOrgHeaderKey, org)
+		req = req.WithContext(context.WithValue(req.Context(), githubOrgHeaderKey, org))
 	}
 	// Disable keep-alive so that we don't get flakes when GitHub closes the
 	// connection prematurely.
@@ -2943,11 +2957,15 @@ func (c *client) GetFile(org, repo, filepath, commit string) ([]byte, error) {
 	return decoded, nil
 }
 
-// Query runs a GraphQL query using shurcooL/githubql's client.
 func (c *client) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+	return c.QueryWithGithubAppsSupport(ctx, q, vars, "")
+}
+
+// QueryWithGithubAppsSupport runs a GraphQL query using shurcooL/githubql's client.
+func (c *client) QueryWithGithubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
 	// Don't log query here because Query is typically called multiple times to get all pages.
 	// Instead log once per search and include total search cost.
-	return c.gqlc.Query(ctx, q, vars)
+	return c.delegate.gqlc.QueryWithGithubAppsSupport(ctx, q, vars, org)
 }
 
 // CreateTeam adds a team with name to the org, returning a struct with the new ID.
