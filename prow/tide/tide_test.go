@@ -549,7 +549,7 @@ func (f *fgc) GetRef(o, r, ref string) (string, error) {
 	return f.refs[o+"/"+r+" "+ref], f.err
 }
 
-func (f *fgc) Query(ctx context.Context, q interface{}, vars map[string]interface{}) error {
+func (f *fgc) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
 	sq, ok := q.(*searchQuery)
 	if !ok {
 		return errors.New("unexpected query type")
@@ -728,7 +728,7 @@ func TestDividePool(t *testing.T) {
 	mmc := newMergeChecker(configGetter, fc)
 	mgr := newFakeManager()
 	c, err := newSyncController(
-		context.Background(), log, fc, mgr, configGetter, nil, nil, nil, mmc,
+		context.Background(), log, fc, mgr, configGetter, nil, nil, nil, mmc, false,
 	)
 	if err != nil {
 		t.Fatalf("failed to construct sync controller: %v", err)
@@ -1660,6 +1660,7 @@ func testTakeAction(clients localgit.Clients, t *testing.T) {
 				nil,
 				nil,
 				nil,
+				false,
 			)
 			if err != nil {
 				t.Fatalf("failed to construct sync controller: %v", err)

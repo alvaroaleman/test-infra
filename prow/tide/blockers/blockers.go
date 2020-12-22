@@ -33,7 +33,7 @@ var (
 )
 
 type githubClient interface {
-	Query(context.Context, interface{}, map[string]interface{}) error
+	QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error
 }
 
 // Blocker specifies an issue number that should block tide from merging.
@@ -70,15 +70,35 @@ func (b Blockers) GetApplicable(org, repo, branch string) []Blocker {
 }
 
 // FindAll finds issues with label in the specified orgs/repos that should block tide.
-func FindAll(ghc githubClient, log *logrus.Entry, label, orgRepoTokens string) (Blockers, error) {
-	issues, err := search(
-		context.Background(),
-		ghc,
-		log,
-		blockerQuery(label, orgRepoTokens),
-	)
-	if err != nil {
-		return Blockers{}, fmt.Errorf("error searching for blocker issues: %v", err)
+func FindAll(ghc githubClient, log *logrus.Entry, label string, orgRepoTokens map[string][]string, splitByOrg bool) (Blockers, error) {
+	queries := map[string]string{}
+	for org, query := range orgRepoTokens {
+		if splitByOrg {
+			if queries[org] == "" {
+				queries[org] = blockerQuery(label)
+			}
+			queries[org] += strings.Join(query, "")
+		} else {
+			if queries[""] == "" {
+				queries[""] = blockerQuery(label)
+			}
+			queries[""] += strings.Join(query, "")
+		}
+	}
+
+	var issues []Issue
+	for org, query := range queries {
+		result, err := search(
+			context.Background(),
+			ghc,
+			log,
+			org,
+			query,
+		)
+		if err != nil {
+			return Blockers{}, fmt.Errorf("error searching for blocker issues: %w", err)
+		}
+		issues = append(issues, result...)
 	}
 
 	return fromIssues(issues, log), nil
@@ -117,12 +137,11 @@ func fromIssues(issues []Issue, log *logrus.Entry) Blockers {
 	return res
 }
 
-func blockerQuery(label, orgRepoTokens string) string {
+func blockerQuery(label string) string {
 	tokens := []string{
 		"is:issue",
 		"state:open",
 		fmt.Sprintf("label:\"%s\"", label),
-		orgRepoTokens,
 	}
 	return strings.Join(tokens, " ")
 }
@@ -135,7 +154,7 @@ func parseBranches(str string) []string {
 	return res
 }
 
-func search(ctx context.Context, ghc githubClient, log *logrus.Entry, q string) ([]Issue, error) {
+func search(ctx context.Context, ghc githubClient, log *logrus.Entry, org, q string) ([]Issue, error) {
 	requestStart := time.Now()
 	var ret []Issue
 	vars := map[string]interface{}{
@@ -146,7 +165,7 @@ func search(ctx context.Context, ghc githubClient, log *logrus.Entry, q string) 
 	var remaining int
 	for {
 		sq := searchQuery{}
-		if err := ghc.Query(ctx, &sq, vars); err != nil {
+		if err := ghc.QueryWithGitHubAppsSupport(ctx, &sq, vars, org); err != nil {
 			return nil, err
 		}
 		totalCost += int(sq.RateLimit.Cost)

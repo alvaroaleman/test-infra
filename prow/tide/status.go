@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,16 +58,17 @@ const (
 type storedState struct {
 	// LatestPR is the update time of the most recent result
 	LatestPR metav1.Time
-	// PreviousQuery is the query most recently used for results
-	PreviousQuery string
+	// PreviousQueries is the query most recently used for results
+	PreviousQueries map[string]string
 }
 
 type statusController struct {
-	pjClient ctrlruntimeclient.Client
-	logger   *logrus.Entry
-	config   config.Getter
-	ghc      githubClient
-	gc       git.ClientFactory
+	pjClient           ctrlruntimeclient.Client
+	logger             *logrus.Entry
+	config             config.Getter
+	ghc                githubClient
+	gc                 git.ClientFactory
+	usesGitHubAppsAuth bool
 
 	mergeChecker *mergeChecker
 
@@ -548,26 +551,39 @@ func (sc *statusController) search() []PullRequest {
 
 	orgExceptions, repos := queries.OrgExceptionsAndRepos()
 	orgs := sets.StringKeySet(orgExceptions)
-	query := openPRsQuery(orgs.List(), repos.List(), orgExceptions)
+	queryMap := openPRsQuery(orgs.List(), repos.List(), orgExceptions, sc.usesGitHubAppsAuth)
 	now := time.Now()
-	log := sc.logger.WithField("query", query)
-	if query != sc.PreviousQuery {
+	log := sc.logger
+	if !reflect.DeepEqual(queries, sc.PreviousQueries) {
 		// Query changed and/or tide restarted, recompute everything
-		log.WithField("previously", sc.PreviousQuery).Info("Query changed, resetting start time to zero")
+		log.WithField("previously", sc.PreviousQueries).Info("Queries changed, resetting start time to zero")
 		sc.LatestPR = metav1.Time{}
-		sc.PreviousQuery = query
+		sc.PreviousQueries = queryMap
 	}
 
-	prs, err := search(sc.ghc.Query, sc.logger, query, sc.LatestPR.Time, now)
-	log.WithField("duration", time.Since(now).String()).Debugf("Found %d open PRs.", len(prs))
-	if err != nil {
-		log := log.WithError(err)
-		if len(prs) == 0 {
-			log.Error("Search failed")
-			return nil
+	var prs []PullRequest
+	var hadSuccess bool
+	var errs []error
+	for org, query := range queryMap {
+		log := log.WithField("query", query)
+		result, err := search(sc.ghc.QueryWithGitHubAppsSupport, sc.logger, org, query, sc.LatestPR.Time, now)
+		log.WithField("duration", time.Since(now).String()).Debugf("Found %d open PRs.", len(result))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("query %s, err: %w", query, err))
 		}
-		log.Warn("Search partially completed")
+		if err == nil || len(result) > 0 {
+			hadSuccess = true
+		}
+		prs = append(prs, result...)
 	}
+	if !hadSuccess {
+		log.Error("Search failed")
+		return nil
+	}
+	if len(errs) > 0 {
+		logrus.WithError(utilerrors.NewAggregate(errs)).Warn("Search partially completed")
+	}
+
 	if len(prs) == 0 {
 		log.WithField("latestPR", sc.LatestPR).Debug("no new results")
 		return nil
@@ -599,8 +615,23 @@ func newBaseSHAGetter(baseSHAs map[string]string, ghc githubClient, org, repo, b
 	}
 }
 
-func openPRsQuery(orgs, repos []string, orgExceptions map[string]sets.String) string {
-	return "is:pr state:open sort:updated-asc " + orgRepoQueryString(orgs, repos, orgExceptions)
+func openPRsQuery(orgs, repos []string, orgExceptions map[string]sets.String, splitByOrg bool) map[string]string {
+	result := map[string]string{}
+	for org, orgScopedIdentifier := range orgRepoQueryStrings(orgs, repos, orgExceptions) {
+		if splitByOrg {
+			if result[org] == "" {
+				result[org] = fmt.Sprintf("is:pr state:open sort:updated-asc")
+			}
+			result[org] += " " + strings.Join(orgScopedIdentifier, " ")
+		} else {
+			if result[""] == "" {
+				result[""] = "is:pr state:open sort:updated-asc"
+			}
+			result[""] += " " + strings.Join(orgScopedIdentifier, " ")
+		}
+	}
+
+	return result
 }
 
 const indexNamePassingJobs = "tide-passing-jobs"

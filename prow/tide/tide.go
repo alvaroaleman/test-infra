@@ -59,7 +59,7 @@ type githubClient interface {
 	GetRef(string, string, string) (string, error)
 	GetRepo(owner, name string) (github.FullRepo, error)
 	Merge(string, string, int, github.MergeDetails) error
-	Query(context.Context, interface{}, map[string]interface{}) error
+	QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error
 }
 
 type contextChecker interface {
@@ -71,12 +71,13 @@ type contextChecker interface {
 
 // Controller knows how to sync PRs and PJs.
 type Controller struct {
-	ctx           context.Context
-	logger        *logrus.Entry
-	config        config.Getter
-	ghc           githubClient
-	prowJobClient ctrlruntimeclient.Client
-	gc            git.ClientFactory
+	ctx                context.Context
+	logger             *logrus.Entry
+	config             config.Getter
+	ghc                githubClient
+	prowJobClient      ctrlruntimeclient.Client
+	gc                 git.ClientFactory
+	usesGitHubAppsAuth bool
 
 	sc *statusController
 
@@ -228,7 +229,7 @@ type manager interface {
 }
 
 // NewController makes a Controller out of the given clients.
-func NewController(ghcSync, ghcStatus github.Client, mgr manager, cfg config.Getter, gc git.ClientFactory, maxRecordsPerPool int, opener io.Opener, historyURI, statusURI string, logger *logrus.Entry) (*Controller, error) {
+func NewController(ghcSync, ghcStatus github.Client, mgr manager, cfg config.Getter, gc git.ClientFactory, maxRecordsPerPool int, opener io.Opener, historyURI, statusURI string, logger *logrus.Entry, usesGitHubAppsAuth bool) (*Controller, error) {
 	if logger == nil {
 		logger = logrus.NewEntry(logrus.StandardLogger())
 	}
@@ -239,30 +240,31 @@ func NewController(ghcSync, ghcStatus github.Client, mgr manager, cfg config.Get
 	mergeChecker := newMergeChecker(cfg, ghcSync)
 
 	ctx := context.Background()
-	sc, err := newStatusController(ctx, logger, ghcStatus, mgr, gc, cfg, opener, statusURI, mergeChecker)
+	sc, err := newStatusController(ctx, logger, ghcStatus, mgr, gc, cfg, opener, statusURI, mergeChecker, usesGitHubAppsAuth)
 	if err != nil {
 		return nil, err
 	}
 	go sc.run()
 
-	return newSyncController(ctx, logger, ghcSync, mgr, cfg, gc, sc, hist, mergeChecker)
+	return newSyncController(ctx, logger, ghcSync, mgr, cfg, gc, sc, hist, mergeChecker, usesGitHubAppsAuth)
 }
 
-func newStatusController(ctx context.Context, logger *logrus.Entry, ghc githubClient, mgr manager, gc git.ClientFactory, cfg config.Getter, opener io.Opener, statusURI string, mergeChecker *mergeChecker) (*statusController, error) {
+func newStatusController(ctx context.Context, logger *logrus.Entry, ghc githubClient, mgr manager, gc git.ClientFactory, cfg config.Getter, opener io.Opener, statusURI string, mergeChecker *mergeChecker, usesGitHubAppsAuth bool) (*statusController, error) {
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &prowapi.ProwJob{}, indexNamePassingJobs, indexFuncPassingJobs); err != nil {
 		return nil, fmt.Errorf("failed to add index for passing jobs to cache: %v", err)
 	}
 	return &statusController{
-		pjClient:       mgr.GetClient(),
-		logger:         logger.WithField("controller", "status-update"),
-		ghc:            ghc,
-		gc:             gc,
-		config:         cfg,
-		mergeChecker:   mergeChecker,
-		newPoolPending: make(chan bool, 1),
-		shutDown:       make(chan bool),
-		opener:         opener,
-		path:           statusURI,
+		pjClient:           mgr.GetClient(),
+		logger:             logger.WithField("controller", "status-update"),
+		ghc:                ghc,
+		gc:                 gc,
+		usesGitHubAppsAuth: usesGitHubAppsAuth,
+		config:             cfg,
+		mergeChecker:       mergeChecker,
+		newPoolPending:     make(chan bool, 1),
+		shutDown:           make(chan bool),
+		opener:             opener,
+		path:               statusURI,
 	}, nil
 }
 
@@ -276,6 +278,7 @@ func newSyncController(
 	sc *statusController,
 	hist *history.History,
 	mergeChecker *mergeChecker,
+	usesGitHubAppsAuth bool,
 ) (*Controller, error) {
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -294,13 +297,14 @@ func newSyncController(
 		return nil, fmt.Errorf("failed to add index for non failed batches: %w", err)
 	}
 	return &Controller{
-		ctx:           ctx,
-		logger:        logger.WithField("controller", "sync"),
-		ghc:           ghcSync,
-		prowJobClient: mgr.GetClient(),
-		config:        cfg,
-		gc:            gc,
-		sc:            sc,
+		ctx:                ctx,
+		logger:             logger.WithField("controller", "sync"),
+		ghc:                ghcSync,
+		prowJobClient:      mgr.GetClient(),
+		config:             cfg,
+		gc:                 gc,
+		usesGitHubAppsAuth: usesGitHubAppsAuth,
+		sc:                 sc,
 		changedFiles: &changedFilesAgent{
 			ghc:             ghcSync,
 			nextChangeCache: make(map[changeCacheKey][]string),
@@ -365,16 +369,33 @@ func (c *Controller) Sync() error {
 	c.logger.Debug("Building tide pool.")
 	prs := make(map[string]PullRequest)
 	for _, query := range c.config().Tide.Queries {
-		q := query.Query()
-		results, err := search(c.ghc.Query, c.logger, q, time.Time{}, time.Now())
-		if err != nil && len(results) == 0 {
-			return fmt.Errorf("query %q, err: %v", q, err)
+
+		// Only split queries by org if we use github apps auth in order to otherwise
+		// save on tokens.
+		var queries map[string]string
+		if c.usesGitHubAppsAuth {
+			queries = query.OrgQueries()
+		} else {
+			queries = map[string]string{"": query.Query()}
 		}
-		if err != nil {
-			c.logger.WithError(err).WithField("query", q).Warning("found partial results")
+
+		var errs []error
+		var hadSuccess bool
+		for org, query := range queries {
+			results, err := search(c.ghc.QueryWithGitHubAppsSupport, c.logger, org, query, time.Time{}, time.Now())
+			if err != nil {
+				errs = append(errs, fmt.Errorf("query %q, err: %w", query, err))
+				c.logger.WithError(err).WithField("query", query).Warning("Query errored")
+			}
+			if err == nil || len(results) > 0 {
+				hadSuccess = true
+			}
+			for _, pr := range results {
+				prs[prKey(&pr)] = pr
+			}
 		}
-		for _, pr := range results {
-			prs[prKey(&pr)] = pr
+		if len(errs) > 0 && !hadSuccess {
+			return utilerrors.NewAggregate(errs)
 		}
 	}
 	c.logger.WithField(
@@ -391,8 +412,8 @@ func (c *Controller) Sync() error {
 			for org := range orgExcepts {
 				orgs = append(orgs, org)
 			}
-			orgRepoQuery := orgRepoQueryString(orgs, repos.UnsortedList(), orgExcepts)
-			blocks, err = blockers.FindAll(c.ghc, c.logger, label, orgRepoQuery)
+			orgRepoQueries := orgRepoQueryStrings(orgs, repos.UnsortedList(), orgExcepts)
+			blocks, err = blockers.FindAll(c.ghc, c.logger, label, orgRepoQueries, c.usesGitHubAppsAuth)
 			if err != nil {
 				return err
 			}
@@ -1793,19 +1814,33 @@ func headContexts(log *logrus.Entry, ghc githubClient, pr *PullRequest) ([]Conte
 	return contexts, nil
 }
 
-func orgRepoQueryString(orgs, repos []string, orgExceptions map[string]sets.String) string {
-	toks := make([]string, 0, len(orgs))
+func orgRepoQueryStrings(orgs, repos []string, orgExceptions map[string]sets.String) map[string][]string {
+	result := map[string][]string{}
 	for _, o := range orgs {
-		toks = append(toks, fmt.Sprintf("org:\"%s\"", o))
+		if _, ok := result[o]; !ok {
+			result[o] = []string{fmt.Sprintf("org:\"%s\"", o)}
+		}
 
 		for _, e := range orgExceptions[o].List() {
-			toks = append(toks, fmt.Sprintf("-repo:\"%s\"", e))
+			result[o] = append(result[o], fmt.Sprintf("-repo:\"%s\"", e))
 		}
 	}
 	for _, r := range repos {
-		toks = append(toks, fmt.Sprintf("repo:\"%s\"", r))
+		if org, _, ok := splitOrgRepoString(r); ok {
+			result[org] = append(result[org], fmt.Sprintf("repo:\"%s\"", r))
+		}
 	}
-	return strings.Join(toks, " ")
+
+	return result
+}
+
+func splitOrgRepoString(orgRepo string) (string, string, bool) {
+	split := strings.Split(orgRepo, "/")
+	if len(split) != 2 {
+		// Just do it like the github search itself and ignore invalid orgRepo identifiers
+		return "", "", false
+	}
+	return split[0], split[1], true
 }
 
 // cacheIndexName is the name of the index that indexes presubmit+batch ProwJobs by

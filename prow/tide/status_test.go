@@ -712,7 +712,7 @@ func TestExpectedStatus(t *testing.T) {
 			ca.Set(&config.Config{})
 			mmc := newMergeChecker(ca.Config, &fgc{})
 
-			sc, err := newStatusController(context.Background(), logrus.NewEntry(logrus.StandardLogger()), nil, newFakeManager(tc.prowJobs...), nil, nil, nil, "", mmc)
+			sc, err := newStatusController(context.Background(), logrus.NewEntry(logrus.StandardLogger()), nil, newFakeManager(tc.prowJobs...), nil, nil, nil, "", mmc, false)
 			if err != nil {
 				t.Fatalf("failed to get statusController: %v", err)
 			}
@@ -842,7 +842,7 @@ func TestSetStatuses(t *testing.T) {
 		}
 
 		mmc := newMergeChecker(ca.Config, fc)
-		sc, err := newStatusController(context.Background(), log, fc, newFakeManager(), nil, ca.Config, nil, "", mmc)
+		sc, err := newStatusController(context.Background(), log, fc, newFakeManager(), nil, ca.Config, nil, "", mmc, false)
 		if err != nil {
 			t.Fatalf("failed to get statusController: %v", err)
 		}
@@ -985,12 +985,6 @@ func TestTargetUrl(t *testing.T) {
 }
 
 func TestOpenPRsQuery(t *testing.T) {
-	var q string
-	checkTok := func(tok string) {
-		if !strings.Contains(q, " "+tok+" ") {
-			t.Errorf("Expected query to contain \"%s\", got \"%s\"", tok, q)
-		}
-	}
 
 	orgs := []string{"org", "kuber"}
 	repos := []string{"k8s/k8s", "k8s/t-i"}
@@ -999,15 +993,64 @@ func TestOpenPRsQuery(t *testing.T) {
 		"irrelevant-org": sets.NewString("irrelevant-org/repo1", "irrelevant-org/repo2"),
 	}
 
-	q = " " + openPRsQuery(orgs, repos, exceptions) + " "
-	checkTok("is:pr")
-	checkTok("state:open")
-	checkTok("org:\"org\"")
-	checkTok("org:\"kuber\"")
-	checkTok("repo:\"k8s/k8s\"")
-	checkTok("repo:\"k8s/t-i\"")
-	checkTok("-repo:\"org/repo1\"")
-	checkTok("-repo:\"org/repo2\"")
+	for _, splitByOrg := range []bool{false, true} {
+		t.Run(fmt.Sprintf("splitByOrg: %t", splitByOrg), func(t *testing.T) {
+			queryMap := openPRsQuery(orgs, repos, exceptions, splitByOrg)
+			if splitByOrg {
+				if n := len(queryMap); n != 3 {
+					t.Errorf("expected three queries, got %d", n)
+				}
+				if queryMap["org"] == "" {
+					t.Error("expected query for org org")
+				}
+				if queryMap["kuber"] == "" {
+					t.Error("expected query for org kuber")
+				}
+				if queryMap["k8s"] == "" {
+					t.Error("expected query for org k8s")
+				}
+				for org, query := range queryMap {
+					checkTok := checkTok(t, query)
+					checkTok(fmt.Sprintf(`org:"%s"`, org))
+					checkTok("is:pr")
+					checkTok("state:open")
+					if org == "org" {
+						checkTok("-repo:\"org/repo1\"")
+						checkTok("-repo:\"org/repo2\"")
+					}
+					if org == "k8s" {
+						checkTok("repo:\"k8s/k8s\"")
+						checkTok("repo:\"k8s/t-i\"")
+					}
+				}
+				return
+			}
+
+			if n := len(queryMap); n != 1 {
+				t.Errorf("expected exactly one query, got %d", n)
+			}
+			checkTok := checkTok(t, queryMap[""])
+			checkTok("is:pr")
+			checkTok("state:open")
+			checkTok("org:\"org\"")
+			checkTok("org:\"kuber\"")
+			checkTok("repo:\"k8s/k8s\"")
+			checkTok("repo:\"k8s/t-i\"")
+			checkTok("-repo:\"org/repo1\"")
+			checkTok("-repo:\"org/repo2\"")
+		})
+	}
+}
+
+func checkTok(t *testing.T, q string) func(tok string) {
+	q = " " + q + " "
+	return func(tok string) {
+		t.Run("Query string contains "+tok, func(t *testing.T) {
+			if !strings.Contains(q, " "+tok+" ") {
+				t.Errorf("Expected query to contain \"%s\", got \"%s\"", tok, q)
+			}
+		})
+	}
 }
 
 func TestIndexFuncPassingJobs(t *testing.T) {
