@@ -1639,6 +1639,14 @@ def go_repositories():
         sum = "h1:DP+LD/t0njgoPBvT5MJLeliUIVQR03hiKR6vezdwHlc=",
         version = "v0.7.1",
     )
+    go_repository(
+        name = "com_github_gofrs_uuid",
+        build_file_generation = "on",
+        build_file_proto_mode = "disable",
+        importpath = "github.com/gofrs/uuid",
+        sum = "h1:1SD/1F5pU8p29ybwgQSwpQk+mwdRrXCYuPhW6m+TnJw=",
+        version = "v4.0.0+incompatible",
+    )
 
     go_repository(
         name = "com_github_gogo_googleapis",
