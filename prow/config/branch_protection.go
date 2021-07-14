@@ -340,7 +340,7 @@ func (c *Config) GetPolicy(org, repo, branch string, b Branch, presubmits []Pres
 	policy := b.Policy
 
 	// Automatically require contexts from prow which must always be present
-	if prowContexts, _, _ := BranchRequirements(branch, presubmits); len(prowContexts) > 0 {
+	if prowContexts, requiredIfPresentContexts, optionalContexts := BranchRequirements(branch, presubmits); len(prowContexts) > 0 || len(requiredIfPresentContexts) > 0 || len(optionalContexts) > 0 {
 		// Error if protection is disabled
 		if policy.Protect != nil && !*policy.Protect {
 			if c.BranchProtection.AllowDisabledJobPolicies != nil && *c.BranchProtection.AllowDisabledJobPolicies {

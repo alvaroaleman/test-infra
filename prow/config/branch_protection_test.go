@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/util/diff"
 	utilpointer "k8s.io/utils/pointer"
 )
@@ -727,7 +728,7 @@ func TestConfig_GetBranchProtection(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Optional presubmits do not force protection",
+			name: "Optional presubmits force empty protection so that we clean up if all jobs are made optional",
 			config: Config{
 				ProwConfig: ProwConfig{
 					BranchProtection: BranchProtection{
@@ -754,6 +755,10 @@ func TestConfig_GetBranchProtection(t *testing.T) {
 					},
 				},
 			},
+			expected: &Policy{
+				Protect:              yes,
+				RequiredStatusChecks: &ContextPolicy{},
+			},
 		},
 		{
 			name: "Explicit configuration takes precedence over ProtectTested",
@@ -766,22 +771,6 @@ func TestConfig_GetBranchProtection(t *testing.T) {
 								Policy: Policy{
 									Protect: yes,
 								},
-							},
-						},
-					},
-				},
-				JobConfig: JobConfig{
-					PresubmitsStatic: map[string][]Presubmit{
-						"org/repo": {
-							{
-								JobBase: JobBase{
-									Name: "optional presubmit",
-								},
-								Reporter: Reporter{
-									Context: "optional presubmit",
-								},
-								AlwaysRun: true,
-								Optional:  true,
 							},
 						},
 					},
@@ -842,8 +831,8 @@ func TestConfig_GetBranchProtection(t *testing.T) {
 			default:
 				normalize(actual)
 				normalize(tc.expected)
-				if !reflect.DeepEqual(actual, tc.expected) {
-					t.Errorf("actual %+v != expected %+v", actual, tc.expected)
+				if diff := cmp.Diff(actual, tc.expected); diff != "" {
+					t.Errorf("actual differs from expected: %s", diff)
 				}
 			}
 		})
